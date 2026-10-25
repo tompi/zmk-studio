@@ -10,6 +10,7 @@ import type {
   Keymap,
 } from "@zmkfirmware/zmk-studio-ts-client/keymap";
 import { validateValue } from "../behaviors/parameters";
+import { isVialFile, readVialFile, VialFile } from "./vial";
 import {
   MOD_BITS,
   MOD_NAMES,
@@ -296,6 +297,10 @@ export function qmkToBinding(
   const simple = SIMPLE.find(([, ...codes]) => codes.includes(code));
   if (simple) return bind(simple[0]);
 
+  if (/^(TD\(\d+\)|M\d+|USER\d+)$/.test(code)) {
+    throw new ImportError("tap dances, macros and custom keycodes can't be imported");
+  }
+
   const usage = qmkToUsage(code);
   if (usage !== undefined) return bind(KEY_PRESS, usage);
 
@@ -309,6 +314,11 @@ export function qmkToBinding(
   }
   if (name === "LT" && args.length === 2) {
     return bind(LAYER_TAP, layer(args[0]), key(args[1]));
+  }
+  // Vial writes layer-taps as LT1(KC_A)
+  const vialLt = /^LT(\d+)$/.exec(name);
+  if (vialLt && args.length === 1) {
+    return bind(LAYER_TAP, layer(vialLt[1]), key(args[0]));
   }
   if (name === "MT" && args.length === 2) {
     const bits = parseModMask(args[0]);
@@ -355,15 +365,26 @@ export function isImportError(e: unknown): e is Error {
 export interface ParsedKeymapFile {
   layers: string[][];
   layerNames?: string[];
+  // Problems found while reading the file, shown along with the import result
+  warnings?: string[];
 }
 
-// Read a QMK Configurator (or ZMK Studio) keymap JSON file
-export function parseKeymapFile(text: string): ParsedKeymapFile {
+export type KeymapFileContents =
+  | { kind: "layers"; file: ParsedKeymapFile }
+  // Vial files need the keyboard's matrix map before they can be imported
+  | { kind: "vial"; vial: VialFile };
+
+// Read a QMK Configurator, ZMK Studio or Vial keymap file
+export function parseKeymapFile(text: string): KeymapFileContents {
   let json: unknown;
   try {
     json = JSON.parse(text);
   } catch {
     throw new Error("The file isn't valid JSON.");
+  }
+
+  if (isVialFile(json)) {
+    return { kind: "vial", vial: readVialFile(json) };
   }
 
   const file = json as Partial<QmkKeymapFile>;
@@ -374,16 +395,19 @@ export function parseKeymapFile(text: string): ParsedKeymapFile {
     )
   ) {
     throw new Error(
-      "The file doesn't look like a QMK Configurator keymap (no \"layers\" list)."
+      "The file doesn't look like a QMK Configurator or Vial keymap."
     );
   }
 
   const names = file.zmk_studio?.layer_names;
   return {
-    layers: file.layers,
-    layerNames:
-      Array.isArray(names) && names.every((n) => typeof n === "string")
-        ? names
-        : undefined,
+    kind: "layers",
+    file: {
+      layers: file.layers,
+      layerNames:
+        Array.isArray(names) && names.every((n) => typeof n === "string")
+          ? names
+          : undefined,
+    },
   };
 }

@@ -11,6 +11,12 @@ import {
   parseKeymapFile,
   ParsedKeymapFile,
 } from "./qmkJson";
+import {
+  fetchQmkMatrix,
+  matrixFromDefinitionFile,
+  VialFile,
+  vialToKeymapFile,
+} from "./vial";
 
 export interface ImportSummary {
   changedKeys: number;
@@ -101,11 +107,17 @@ export const KeymapFileControls = ({
     setExportNames(undefined);
   };
 
-  const doImport = async (f: File) => {
-    setImporting(true);
+  // A Vial file waiting for the user to say which keyboard it's from
+  const [vial, setVial] = useState<
+    | { file: VialFile; keyboard: string; layout: string; error?: string }
+    | undefined
+  >(undefined);
+  const vialRef = useModalRef(!!vial);
+  const definitionInput = useRef<HTMLInputElement>(null);
+
+  const runImport = async (file: ParsedKeymapFile) => {
     try {
-      const parsed = parseKeymapFile(await f.text());
-      const { changedKeys, warnings } = await onImport(parsed);
+      const { changedKeys, warnings } = await onImport(file);
       setResult({
         title: "Keymap imported",
         message: `${changedKeys} key${changedKeys === 1 ? "" : "s"} changed. Save to keep the changes on the keyboard, or use undo to go back.`,
@@ -117,6 +129,48 @@ export const KeymapFileControls = ({
         message: e instanceof Error ? e.message : String(e),
         warnings: [],
       });
+    }
+  };
+
+  const doImport = async (f: File) => {
+    setImporting(true);
+    try {
+      const contents = parseKeymapFile(await f.text());
+      if (contents.kind === "vial") {
+        setVial({
+          file: contents.vial,
+          ...(loadQmkNames(deviceName) ?? guessQmkKeyboard(deviceName, keyCount)),
+        });
+      } else {
+        await runImport(contents.file);
+      }
+    } catch (e) {
+      setResult({
+        title: "Couldn't import the keymap",
+        message: e instanceof Error ? e.message : String(e),
+        warnings: [],
+      });
+    } finally {
+      setImporting(false);
+    }
+  };
+
+  // Map the Vial file's matrix to key order, either looked up from QMK or from a definition file
+  const importVial = async (definitionFile?: File) => {
+    if (!vial) return;
+    setImporting(true);
+    try {
+      const matrix = definitionFile
+        ? matrixFromDefinitionFile(await definitionFile.text(), vial.layout)
+        : await fetchQmkMatrix(vial.keyboard, vial.layout);
+      if (!definitionFile) {
+        saveQmkNames(deviceName, { keyboard: vial.keyboard, layout: vial.layout });
+      }
+      const file = vialToKeymapFile(vial.file, matrix);
+      setVial(undefined);
+      await runImport(file);
+    } catch (e) {
+      setVial((v) => v && { ...v, error: e instanceof Error ? e.message : String(e) });
     } finally {
       setImporting(false);
     }
@@ -130,7 +184,7 @@ export const KeymapFileControls = ({
           className={buttonClass}
           disabled={importing}
           onClick={() => fileInput.current?.click()}
-          title="Import a keymap from a QMK Configurator JSON file"
+          title="Import a keymap from a QMK Configurator (.json) or Vial (.vil) file"
         >
           <Upload className="size-4" /> Import
         </button>
@@ -145,7 +199,7 @@ export const KeymapFileControls = ({
         <input
           ref={fileInput}
           type="file"
-          accept=".json,application/json"
+          accept=".json,.vil,application/json"
           className="hidden"
           onChange={(e) => {
             const f = e.target.files?.[0];
@@ -205,6 +259,80 @@ export const KeymapFileControls = ({
               Export
             </button>
           </div>
+        </form>
+      </GenericModal>
+
+      <GenericModal
+        ref={vialRef}
+        className="min-w-min w-[30vw]"
+        onClose={() => setVial(undefined)}
+      >
+        <form
+          className="flex flex-col gap-2"
+          onSubmit={(e) => {
+            e.preventDefault();
+            importVial();
+          }}
+        >
+          <h2 className="text-lg">Import Vial Keymap</h2>
+          <p className="text-sm opacity-80">
+            Vial files store keys by switch matrix position, so the keyboard's
+            layout is needed to put them in the right place. Enter QMK's names
+            for the keyboard the file was saved from, or choose its definition
+            file (info.json, keyboard.json or vial.json).
+          </p>
+          <label className="flex flex-col gap-1 text-sm">
+            QMK keyboard
+            <input
+              className={inputClass}
+              value={vial?.keyboard ?? ""}
+              onChange={(e) =>
+                setVial((v) => v && { ...v, keyboard: e.target.value, error: undefined })
+              }
+            />
+          </label>
+          <label className="flex flex-col gap-1 text-sm">
+            QMK layout
+            <input
+              className={inputClass}
+              value={vial?.layout ?? ""}
+              onChange={(e) =>
+                setVial((v) => v && { ...v, layout: e.target.value, error: undefined })
+              }
+            />
+          </label>
+          {vial?.error && <p className="text-sm text-red-500">{vial.error}</p>}
+          <div className="mt-2 flex justify-end gap-3">
+            <button
+              type="button"
+              className={`${dialogButtonClass} mr-auto`}
+              disabled={importing}
+              onClick={() => definitionInput.current?.click()}
+            >
+              Choose definition file…
+            </button>
+            <button
+              type="button"
+              className={dialogButtonClass}
+              onClick={() => setVial(undefined)}
+            >
+              Cancel
+            </button>
+            <button type="submit" className={primaryButtonClass} disabled={importing}>
+              {importing ? "Importing…" : "Import"}
+            </button>
+          </div>
+          <input
+            ref={definitionInput}
+            type="file"
+            accept=".json,application/json"
+            className="hidden"
+            onChange={(e) => {
+              const f = e.target.files?.[0];
+              e.target.value = "";
+              if (f) importVial(f);
+            }}
+          />
         </form>
       </GenericModal>
 

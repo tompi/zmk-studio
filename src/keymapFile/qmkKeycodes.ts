@@ -12,7 +12,7 @@ type Entry = [number, string, ...string[]];
 const KEYBOARD: Entry[] = [
   [0x28, "KC_ENT", "KC_ENTER"],
   [0x29, "KC_ESC", "KC_ESCAPE"],
-  [0x2a, "KC_BSPC", "KC_BACKSPACE"],
+  [0x2a, "KC_BSPC", "KC_BACKSPACE", "KC_BSPACE"],
   [0x2b, "KC_TAB"],
   [0x2c, "KC_SPC", "KC_SPACE"],
   [0x2d, "KC_MINS", "KC_MINUS"],
@@ -21,27 +21,27 @@ const KEYBOARD: Entry[] = [
   [0x30, "KC_RBRC", "KC_RIGHT_BRACKET", "KC_RBRACKET"],
   [0x31, "KC_BSLS", "KC_BACKSLASH", "KC_BSLASH"],
   [0x32, "KC_NUHS", "KC_NONUS_HASH"],
-  [0x33, "KC_SCLN", "KC_SEMICOLON"],
+  [0x33, "KC_SCLN", "KC_SEMICOLON", "KC_SCOLON"],
   [0x34, "KC_QUOT", "KC_QUOTE"],
-  [0x35, "KC_GRV", "KC_GRAVE"],
+  [0x35, "KC_GRV", "KC_GRAVE", "KC_ZKHK"],
   [0x36, "KC_COMM", "KC_COMMA"],
   [0x37, "KC_DOT"],
   [0x38, "KC_SLSH", "KC_SLASH"],
   [0x39, "KC_CAPS", "KC_CAPS_LOCK", "KC_CAPSLOCK", "KC_CLCK"],
-  [0x46, "KC_PSCR", "KC_PRINT_SCREEN"],
-  [0x47, "KC_SCRL", "KC_SCROLL_LOCK", "KC_SLCK"],
+  [0x46, "KC_PSCR", "KC_PRINT_SCREEN", "KC_PSCREEN"],
+  [0x47, "KC_SCRL", "KC_SCROLL_LOCK", "KC_SCROLLLOCK", "KC_SLCK"],
   [0x48, "KC_PAUS", "KC_PAUSE", "KC_BRK"],
   [0x49, "KC_INS", "KC_INSERT"],
   [0x4a, "KC_HOME"],
   [0x4b, "KC_PGUP", "KC_PAGE_UP"],
   [0x4c, "KC_DEL", "KC_DELETE"],
   [0x4d, "KC_END"],
-  [0x4e, "KC_PGDN", "KC_PAGE_DOWN"],
+  [0x4e, "KC_PGDN", "KC_PAGE_DOWN", "KC_PGDOWN"],
   [0x4f, "KC_RGHT", "KC_RIGHT"],
   [0x50, "KC_LEFT"],
   [0x51, "KC_DOWN"],
   [0x52, "KC_UP"],
-  [0x53, "KC_NUM", "KC_NUM_LOCK", "KC_NLCK"],
+  [0x53, "KC_NUM", "KC_NUM_LOCK", "KC_NUMLOCK", "KC_NLCK"],
   [0x54, "KC_PSLS", "KC_KP_SLASH"],
   [0x55, "KC_PAST", "KC_KP_ASTERISK"],
   [0x56, "KC_PMNS", "KC_KP_MINUS"],
@@ -49,7 +49,7 @@ const KEYBOARD: Entry[] = [
   [0x58, "KC_PENT", "KC_KP_ENTER"],
   [0x62, "KC_P0", "KC_KP_0"],
   [0x63, "KC_PDOT", "KC_KP_DOT"],
-  [0x64, "KC_NUBS", "KC_NONUS_BACKSLASH"],
+  [0x64, "KC_NUBS", "KC_NONUS_BACKSLASH", "KC_NONUS_BSLASH"],
   [0x65, "KC_APP", "KC_APPLICATION"],
   [0x66, "KC_KB_POWER"],
   [0x67, "KC_PEQL", "KC_KP_EQUAL"],
@@ -64,9 +64,9 @@ const KEYBOARD: Entry[] = [
   [0x7c, "KC_COPY"],
   [0x7d, "KC_PSTE", "KC_PASTE"],
   [0x7e, "KC_FIND"],
-  [0x7f, "KC_KB_MUTE"],
-  [0x80, "KC_KB_VOLUME_UP"],
-  [0x81, "KC_KB_VOLUME_DOWN"],
+  [0x7f, "KC_KB_MUTE", "KC__MUTE"],
+  [0x80, "KC_KB_VOLUME_UP", "KC__VOLUP"],
+  [0x81, "KC_KB_VOLUME_DOWN", "KC__VOLDOWN"],
   [0x85, "KC_PCMM", "KC_KP_COMMA"],
   [0xe0, "KC_LCTL", "KC_LEFT_CTRL", "KC_LCTRL"],
   [0xe1, "KC_LSFT", "KC_LEFT_SHIFT", "KC_LSHIFT"],
@@ -84,8 +84,13 @@ for (let i = 1; i <= 9; i++) {
   KEYBOARD.push([0x1d + i, `KC_${i}`]);
   KEYBOARD.push([0x58 + i, `KC_P${i}`, `KC_KP_${i}`]);
   KEYBOARD.push([0x86 + i, `KC_INT${i}`, `KC_INTERNATIONAL_${i}`]);
-  KEYBOARD.push([0x8f + i, `KC_LNG${i}`, `KC_LANGUAGE_${i}`]);
+  KEYBOARD.push([0x8f + i, `KC_LNG${i}`, `KC_LANGUAGE_${i}`, `KC_LANG${i}`]);
 }
+// Older QMK names for some international keys (Vial still uses them)
+const OLD_INT_NAMES = ["KC_RO", "KC_KANA", "KC_JYEN", "KC_HENK", "KC_MHEN"];
+OLD_INT_NAMES.forEach((name, i) =>
+  (KEYBOARD.find(([id]) => id === 0x87 + i) as string[]).push(name)
+);
 KEYBOARD.push([0x27, "KC_0"]);
 for (let i = 1; i <= 12; i++) KEYBOARD.push([0x39 + i, `KC_F${i}`]);
 for (let i = 13; i <= 24; i++) KEYBOARD.push([0x68 + i - 13, `KC_F${i}`]);
@@ -174,7 +179,13 @@ const MOD_ALIASES: Record<string, number> = {
   C_S: MOD_BITS.LCTL | MOD_BITS.LSFT,
   LCA: MOD_BITS.LCTL | MOD_BITS.LALT,
   LSA: MOD_BITS.LSFT | MOD_BITS.LALT,
+  LCG: MOD_BITS.LCTL | MOD_BITS.LGUI,
+  LAG: MOD_BITS.LALT | MOD_BITS.LGUI,
+  SGUI: MOD_BITS.LSFT | MOD_BITS.LGUI,
+  LSG: MOD_BITS.LSFT | MOD_BITS.LGUI,
   LCAG: MOD_BITS.LCTL | MOD_BITS.LALT | MOD_BITS.LGUI,
+  RCG: MOD_BITS.RCTL | MOD_BITS.RGUI,
+  RCAG: MOD_BITS.RCTL | MOD_BITS.RALT | MOD_BITS.RGUI,
   MEH: MOD_BITS.LCTL | MOD_BITS.LSFT | MOD_BITS.LALT,
   HYPR: MOD_BITS.LCTL | MOD_BITS.LSFT | MOD_BITS.LALT | MOD_BITS.LGUI,
 };

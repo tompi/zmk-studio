@@ -62,7 +62,7 @@ export async function applyImport(
   file: ParsedKeymapFile,
   behaviors: BehaviorMap
 ): Promise<ImportResult> {
-  const warnings: string[] = [];
+  const warnings: string[] = [...(file.warnings ?? [])];
   const before = await getKeymap(conn);
 
   // Add layers if the file has more than the keyboard
