@@ -3,12 +3,15 @@
     "Bootloader": {"short": "Bootloadr"},
     "External Power": {"short": "Ext Pwr"},
     "Grave/Escape": {"short": "Grv/Esc"},
+    "Layer-Tap": {"short": "LT"},
+    "Mod-Tap": {"short": "MT"},
+    "To Layer": {"short": "TO"},
     "Key Repeat": {"short": "Key Rept"},
     "Key Toggle": {"short": "Key Togg"},
-    "Momentary Layer": {"short": "MLayer"},
+    "Momentary Layer": {"short": "MO"},
     "Output Selection": {"short": "OutputSel"},
     "Sticky Key": {"short": "Stcky Key"},
     "Studio Unlock": {"short": "Unlock"},
-    "Toggle Layer": {"short": "Togg Layr"},
+    "Toggle Layer": {"short": "TG"},
     "Transparent": {"short": "Transprnt"}
 }
