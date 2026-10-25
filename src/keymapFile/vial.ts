@@ -4,15 +4,19 @@
 // is no switch), not in layout order. To turn that into ZMK's key order we need the
 // keyboard's matrix map, which comes from QMK's keyboard API or a definition file.
 
+import type { KeyPhysicalAttrs } from "@zmkfirmware/zmk-studio-ts-client/keymap";
 import type { ParsedKeymapFile } from "./qmkJson";
 
 const isZmkOnlyKey = (code: string) => code.startsWith("ZMK(");
 
-type MatrixPos = [number, number];
+export type MatrixPos = [number, number];
 
 export interface VialFile {
   layout: (string | number)[][][];
   encoderLayout?: (string | number)[][][];
+  // Key order -> matrix position, stored by ZMK Studio's export so it can import
+  // the file again without looking up the keyboard. Vial ignores it.
+  matrix?: MatrixPos[];
 }
 
 export function isVialFile(json: unknown): boolean {
@@ -23,14 +27,58 @@ export function isVialFile(json: unknown): boolean {
   );
 }
 
+const isMatrix = (m: unknown): m is MatrixPos[] =>
+  Array.isArray(m) &&
+  m.length > 0 &&
+  m.every(
+    (p) =>
+      Array.isArray(p) &&
+      p.length === 2 &&
+      p.every((n) => Number.isInteger(n) && n >= 0)
+  );
+
 export function readVialFile(json: unknown): VialFile {
-  const j = json as { layout: VialFile["layout"]; encoder_layout?: unknown };
+  const j = json as {
+    layout: VialFile["layout"];
+    encoder_layout?: unknown;
+    zmk_studio?: { matrix?: unknown };
+  };
+  const matrix = j.zmk_studio?.matrix;
   return {
     layout: j.layout,
     encoderLayout: Array.isArray(j.encoder_layout)
       ? (j.encoder_layout as VialFile["encoderLayout"])
       : undefined,
+    matrix: isMatrix(matrix) ? matrix : undefined,
   };
+}
+
+// A made-up matrix from where keys sit on screen: keys whose centers are within half
+// a key height of a row's top key form a row, numbered left to right. Used when the
+// real wiring isn't known.
+export function matrixFromPositions(keys: KeyPhysicalAttrs[]): MatrixPos[] {
+  const centers = keys.map((k, i) => ({
+    i,
+    x: k.x + k.width / 2,
+    y: k.y + k.height / 2,
+  }));
+  const heights = keys.map((k) => k.height).sort((a, b) => a - b);
+  const rowGap = (heights[Math.floor(heights.length / 2)] || 100) / 2;
+
+  const rows: (typeof centers)[] = [];
+  for (const c of [...centers].sort((a, b) => a.y - b.y)) {
+    const row = rows[rows.length - 1];
+    if (row && c.y - row[0].y <= rowGap) row.push(c);
+    else rows.push([c]);
+  }
+
+  const matrix: MatrixPos[] = Array(keys.length);
+  rows.forEach((row, r) =>
+    row
+      .sort((a, b) => a.x - b.x)
+      .forEach((c, col) => (matrix[c.i] = [r, col]))
+  );
+  return matrix;
 }
 
 // Built in so Corne works offline. Same data as QMK's crkbd/rev1 info.json.
@@ -248,6 +296,7 @@ export function exportVialKeymap(
       encoder_layout: [],
       // Default choices, which is what the matrix map above assumes
       layout_options: 0,
+      zmk_studio: { matrix },
     },
     warnings,
   };

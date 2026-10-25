@@ -1,6 +1,9 @@
 import { useRef, useState } from "react";
 import { Download, Upload } from "lucide-react";
-import type { Keymap } from "@zmkfirmware/zmk-studio-ts-client/keymap";
+import type {
+  KeyPhysicalAttrs,
+  Keymap,
+} from "@zmkfirmware/zmk-studio-ts-client/keymap";
 
 import { GenericModal } from "../GenericModal";
 import { useModalRef } from "../misc/useModalRef";
@@ -13,9 +16,11 @@ import {
   ParsedKeymapFile,
 } from "./qmkJson";
 import {
+  MatrixPos,
   exportVialKeymap,
   fetchQmkMatrix,
   matrixFromDefinitionFile,
+  matrixFromPositions,
   VialFile,
   vialToKeymapFile,
 } from "./vial";
@@ -29,7 +34,8 @@ interface KeymapFileControlsProps {
   keymap: Keymap;
   behaviors: BehaviorMap;
   deviceName: string;
-  keyCount: number;
+  // The selected physical layout's keys, in key order
+  physicalKeys: KeyPhysicalAttrs[];
   onImport: (file: ParsedKeymapFile) => Promise<ImportSummary>;
 }
 
@@ -95,9 +101,10 @@ export const KeymapFileControls = ({
   keymap,
   behaviors,
   deviceName,
-  keyCount,
+  physicalKeys,
   onImport,
 }: KeymapFileControlsProps) => {
+  const keyCount = physicalKeys.length;
   const fileInput = useRef<HTMLInputElement>(null);
 
   const [exportNames, setExportNames] = useState<
@@ -136,14 +143,31 @@ export const KeymapFileControls = ({
 
     setExporting(true);
     try {
-      const matrix = definitionFile
-        ? matrixFromDefinitionFile(await definitionFile.text(), layout)
-        : await fetchQmkMatrix(keyboard, layout);
-      if (!definitionFile) saveQmkNames(deviceName, { keyboard, layout });
-      const { file, warnings } = exportVialKeymap(
+      let matrix: MatrixPos[];
+      let lookupFailed: string | undefined;
+      if (definitionFile) {
+        matrix = matrixFromDefinitionFile(await definitionFile.text(), layout);
+      } else {
+        saveQmkNames(deviceName, { keyboard, layout });
+        try {
+          matrix = await fetchQmkMatrix(keyboard, layout);
+        } catch (e) {
+          // No known wiring: place keys by where they are on screen instead
+          lookupFailed = e instanceof Error ? e.message : String(e);
+          matrix = matrixFromPositions(physicalKeys);
+        }
+      }
+      const exported = exportVialKeymap(
         keymapToQmkLayers(keymap, behaviors),
         matrix
       );
+      const { file } = exported;
+      const warnings = lookupFailed
+        ? [
+            `${lookupFailed} Keys were placed by their position on screen instead. That's fine for a backup or for importing into ZMK Studio, but a Vial keyboard will likely put keys in the wrong places.`,
+            ...exported.warnings.filter((w) => !w.includes("chosen layout has")),
+          ]
+        : exported.warnings;
       const name = (keyboard.trim() || deviceName).replace(/[/\s]+/g, "_");
       downloadJson(`${name}_zmk_studio.vil`, file);
       setExportNames(undefined);
@@ -192,7 +216,10 @@ export const KeymapFileControls = ({
     setImporting(true);
     try {
       const contents = parseKeymapFile(await f.text());
-      if (contents.kind === "vial") {
+      if (contents.kind === "vial" && contents.vial.matrix) {
+        // Exported by ZMK Studio, which stored the matrix map in the file
+        await runImport(vialToKeymapFile(contents.vial, contents.vial.matrix));
+      } else if (contents.kind === "vial") {
         setVial({
           file: contents.vial,
           ...(loadQmkNames(deviceName) ?? guessQmkKeyboard(deviceName, keyCount)),
@@ -300,7 +327,7 @@ export const KeymapFileControls = ({
           </fieldset>
           <p className="text-sm opacity-80">
             {exportNames?.format === "vial"
-              ? "Saves a layout file for Vial's File → Load saved layout. Vial stores keys by switch matrix position, so enter QMK's names for the keyboard you'll load it on, or choose its definition file (info.json, keyboard.json or vial.json)."
+              ? "Saves a layout file for Vial's File → Load saved layout. Vial stores keys by switch matrix position, so enter QMK's names for the keyboard you'll load it on, or choose its definition file (info.json, keyboard.json or vial.json). If QMK doesn't know the keyboard, keys are placed by their position on screen, which ZMK Studio can import again."
               : "Saves a QMK Configurator keymap JSON file. For QMK Configurator to open it, the keyboard and layout must match QMK's names for this keyboard."}
           </p>
           <label className="flex flex-col gap-1 text-sm">

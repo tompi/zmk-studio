@@ -566,7 +566,7 @@ export default function Keyboard({ deviceName }: KeyboardProps) {
               keymap={keymap}
               behaviors={behaviors}
               deviceName={deviceName || "keyboard"}
-              keyCount={layouts[selectedPhysicalLayoutIndex]?.keys.length || 0}
+              physicalKeys={layouts[selectedPhysicalLayoutIndex]?.keys ?? []}
               onImport={importKeymap}
             />
           </div>
