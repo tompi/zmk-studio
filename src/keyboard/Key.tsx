@@ -22,24 +22,37 @@ export const Key = ({
   onClick,
   children,
 }: PropsWithChildren<KeyProps>) => {
-  const pixelWidth = width * oneU - 2;
-  const pixelHeight = height * oneU - 2;
+  // Leave a small gap between neighbouring keys
+  const pixelWidth = width * oneU - 4;
+  const pixelHeight = height * oneU - 4;
+
+  // Keycap look like QMK Configurator: a darker "side" with a lighter top
+  // surface that sits a bit toward the top, as if seen slightly from above.
+  const sideColor = selected
+    ? "bg-[color-mix(in_srgb,theme(colors.primary),black_30%)]"
+    : "bg-[color-mix(in_srgb,theme(colors.base-100),black_22%)]";
+  const topColor = selected
+    ? "bg-primary text-primary-content"
+    : "bg-base-100 text-base-content";
 
   return (
     <button
-      className={`group rounded relative flex justify-center items-center cursor-pointer transition-all hover:shadow-xl hover:ring-1 hover:ring-gray-300 hover:scale-125 ${selected ? "bg-primary text-primary-content" : "bg-base-100 text-base-content"
-        }`}
+      className={`group relative flex rounded-md px-[3px] pt-[2px] pb-[6px] cursor-pointer transition-all shadow-[0_2px_3px_rgba(0,0,0,0.35)] hover:shadow-xl hover:ring-1 hover:ring-gray-300 hover:scale-125 ${sideColor}`}
       style={{
         width: `${pixelWidth}px`,
         height: `${pixelHeight}px`,
       }}
       onClick={onClick}
     >
-      <div className={`absolute text-xs ${selected ? "text-primary-content" : "z1text-base-content"} opacity-80 top-1 text-nowrap left-1/2 font-light -translate-x-1/2 text-center`}>
-        {shortenHeader(header)}
-        {headerDetail && <> {headerDetail}</>}
+      <div
+        className={`relative flex flex-1 flex-col justify-center items-center rounded bg-gradient-to-b from-white/10 to-black/5 ${topColor}`}
+      >
+        <div className="absolute text-xs opacity-80 top-[2px] text-nowrap left-1/2 font-light -translate-x-1/2 text-center">
+          {shortenHeader(header)}
+          {headerDetail && <> {headerDetail}</>}
+        </div>
+        {children}
       </div>
-      {children}
     </button>
   );
 };

@@ -47,7 +47,7 @@ function paramLabel(
 
 // Inset box around the main parameter, like QMK Configurator's MO(1) / LT keys.
 const ParamBox = ({ children }: { children: ReactNode }) => (
-  <span className="mt-2 px-1 min-w-[1.6em] max-w-[85%] truncate rounded-sm border border-current leading-tight">
+  <span className="mt-1 px-1 min-w-[1.6em] max-w-[85%] truncate rounded-sm border border-current leading-tight">
     {children}
   </span>
 );
