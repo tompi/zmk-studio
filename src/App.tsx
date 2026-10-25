@@ -326,7 +326,7 @@ function App() {
               onDisconnect={disconnect}
               onResetSettings={resetSettings}
             />
-            <Keyboard />
+            <Keyboard deviceName={connectedDeviceName} />
             <AppFooter
               onShowAbout={() => setShowAbout(true)}
               onShowLicenseNotice={() => setShowLicenseNotice(true)}

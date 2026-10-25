@@ -29,13 +29,17 @@ export function useUndoRedo(): [
 
   const doIt = async (doCb: DoCallback, preserveRedo?: boolean) => {
     setLocked(true);
-    let undo = await doCb();
+    try {
+      let undo = await doCb();
 
-    setUndoStack([[doCb, undo], ...undoStack]);
-    if (!preserveRedo) {
-      setRedoStack([]);
+      setUndoStack([[doCb, undo], ...undoStack]);
+      if (!preserveRedo) {
+        setRedoStack([]);
+      }
+    } finally {
+      // Unlock even if the operation failed, or undo/redo would stay disabled
+      setLocked(false);
     }
-    setLocked(false);
   };
 
   const undo = async () => {

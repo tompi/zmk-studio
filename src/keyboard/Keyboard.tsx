@@ -31,6 +31,12 @@ import { LockStateContext } from "../rpc/LockStateContext";
 import { LockState } from "@zmkfirmware/zmk-studio-ts-client/core";
 import { deserializeLayoutZoom, LayoutZoom } from "./PhysicalLayout";
 import { useLocalStorageState } from "../misc/useLocalStorageState";
+import {
+  ImportSummary,
+  KeymapFileControls,
+} from "../keymapFile/KeymapFileControls";
+import { applyImport } from "../keymapFile/applyImport";
+import type { ParsedKeymapFile } from "../keymapFile/qmkJson";
 
 type BehaviorMap = Record<number, GetBehaviorDetailsResponse>;
 
@@ -158,7 +164,11 @@ function useLayouts(): [
   ];
 }
 
-export default function Keyboard() {
+export interface KeyboardProps {
+  deviceName?: string;
+}
+
+export default function Keyboard({ deviceName }: KeyboardProps) {
   const [
     layouts,
     _setLayouts,
@@ -490,6 +500,27 @@ export default function Keyboard() {
     [conn, undoRedo, keymap]
   );
 
+  const importKeymap = useCallback(
+    async (file: ParsedKeymapFile): Promise<ImportSummary> => {
+      let summary: ImportSummary = { changedKeys: 0, warnings: [] };
+      await undoRedo?.(async () => {
+        if (!conn.conn) {
+          throw new Error("Not connected");
+        }
+        const result = await applyImport(conn.conn, file, behaviors);
+        setKeymap(result.keymap);
+        summary = result;
+
+        return async () => {
+          const restored = await result.undo();
+          if (restored) setKeymap(restored);
+        };
+      });
+      return summary;
+    },
+    [conn, undoRedo, behaviors]
+  );
+
   useEffect(() => {
     if (!keymap?.layers) return;
 
@@ -525,6 +556,18 @@ export default function Keyboard() {
               onAddClicked={addLayer}
               onRemoveClicked={removeLayer}
               onLayerNameChanged={changeLayerName}
+            />
+          </div>
+        )}
+
+        {keymap && layouts && (
+          <div className="mt-auto">
+            <KeymapFileControls
+              keymap={keymap}
+              behaviors={behaviors}
+              deviceName={deviceName || "keyboard"}
+              keyCount={layouts[selectedPhysicalLayoutIndex]?.keys.length || 0}
+              onImport={importKeymap}
             />
           </div>
         )}
