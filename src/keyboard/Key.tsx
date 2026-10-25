@@ -1,5 +1,6 @@
 import { PropsWithChildren, ReactNode } from "react";
 import { shortenHeader } from "./shortenHeader";
+import { FitText } from "./FitText";
 
 interface KeyProps {
   selected?: boolean;
@@ -47,9 +48,11 @@ export const Key = ({
       <div
         className={`relative flex flex-1 flex-col justify-center items-center rounded bg-gradient-to-b from-white/10 to-black/5 ${topColor}`}
       >
-        <div className="absolute text-xs opacity-80 top-[2px] text-nowrap left-1/2 font-light -translate-x-1/2 text-center">
-          {shortenHeader(header)}
-          {headerDetail && <> {headerDetail}</>}
+        <div className="absolute inset-x-[2px] top-[2px] flex justify-center text-xs opacity-80 font-light">
+          <FitText className="max-w-full">
+            {shortenHeader(header)}
+            {headerDetail && <> {headerDetail}</>}
+          </FitText>
         </div>
         {children}
       </div>

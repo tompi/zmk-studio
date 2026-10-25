@@ -14,6 +14,7 @@ import {
   PhysicalLayout as PhysicalLayoutComp,
 } from "./PhysicalLayout";
 import { HidUsageLabel } from "./HidUsageLabel";
+import { FitText } from "./FitText";
 import { shortenHeader } from "./shortenHeader";
 import { validateValue } from "../behaviors/parameters";
 
@@ -47,9 +48,9 @@ function paramLabel(
 
 // Inset box around the main parameter, like QMK Configurator's MO(1) / LT keys.
 const ParamBox = ({ children }: { children: ReactNode }) => (
-  <span className="mt-1 px-1 min-w-[1.6em] max-w-[85%] truncate rounded-sm border border-current leading-tight">
+  <FitText className="mt-1 px-1 min-w-[1.6em] max-w-[85%] text-center rounded-sm border border-current leading-tight">
     {children}
-  </span>
+  </FitText>
 );
 
 function bindingLabels(
@@ -78,7 +79,11 @@ function bindingLabels(
 
   // Behaviors without a header (plain key press) show their label as-is
   if (shortenHeader(behavior.displayName) === "") {
-    return { children: labels[0] };
+    return {
+      children: (
+        <FitText className="max-w-full px-[2px] text-center">{labels[0]}</FitText>
+      ),
+    };
   }
 
   if (labels.length === 1) {
