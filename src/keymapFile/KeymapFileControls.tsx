@@ -8,10 +8,12 @@ import {
   BehaviorMap,
   exportQmkKeymap,
   guessQmkKeyboard,
+  keymapToQmkLayers,
   parseKeymapFile,
   ParsedKeymapFile,
 } from "./qmkJson";
 import {
+  exportVialKeymap,
   fetchQmkMatrix,
   matrixFromDefinitionFile,
   VialFile,
@@ -51,6 +53,24 @@ function saveQmkNames(deviceName: string, names: { keyboard: string; layout: str
   }
 }
 
+type ExportFormat = "qmk" | "vial";
+
+function loadExportFormat(): ExportFormat {
+  try {
+    return localStorage.getItem("keymapExportFormat") === "vial" ? "vial" : "qmk";
+  } catch {
+    return "qmk";
+  }
+}
+
+function saveExportFormat(format: ExportFormat) {
+  try {
+    localStorage.setItem("keymapExportFormat", format);
+  } catch {
+    // Not remembering the format is fine
+  }
+}
+
 function downloadJson(fileName: string, data: unknown) {
   const blob = new Blob([JSON.stringify(data, null, 2) + "\n"], {
     type: "application/json",
@@ -81,9 +101,12 @@ export const KeymapFileControls = ({
   const fileInput = useRef<HTMLInputElement>(null);
 
   const [exportNames, setExportNames] = useState<
-    { keyboard: string; layout: string } | undefined
+    | { format: ExportFormat; keyboard: string; layout: string; error?: string }
+    | undefined
   >(undefined);
   const exportRef = useModalRef(!!exportNames);
+  const exportDefinitionInput = useRef<HTMLInputElement>(null);
+  const [exporting, setExporting] = useState(false);
 
   const [importing, setImporting] = useState(false);
   const [result, setResult] = useState<
@@ -92,19 +115,52 @@ export const KeymapFileControls = ({
   const resultRef = useModalRef(!!result);
 
   const startExport = () =>
-    setExportNames(loadQmkNames(deviceName) ?? guessQmkKeyboard(deviceName, keyCount));
+    setExportNames({
+      format: loadExportFormat(),
+      ...(loadQmkNames(deviceName) ?? guessQmkKeyboard(deviceName, keyCount)),
+    });
 
-  const doExport = () => {
+  // Vial exports need the matrix map, looked up from QMK or read from a definition file
+  const doExport = async (definitionFile?: File) => {
     if (!exportNames) return;
-    saveQmkNames(deviceName, exportNames);
-    const file = exportQmkKeymap(
-      keymap,
-      behaviors,
-      exportNames.keyboard,
-      exportNames.layout
-    );
-    downloadJson(`${file.keymap}.json`, file);
-    setExportNames(undefined);
+    const { format, keyboard, layout } = exportNames;
+    saveExportFormat(format);
+
+    if (format === "qmk") {
+      saveQmkNames(deviceName, { keyboard, layout });
+      const file = exportQmkKeymap(keymap, behaviors, keyboard, layout);
+      downloadJson(`${file.keymap}.json`, file);
+      setExportNames(undefined);
+      return;
+    }
+
+    setExporting(true);
+    try {
+      const matrix = definitionFile
+        ? matrixFromDefinitionFile(await definitionFile.text(), layout)
+        : await fetchQmkMatrix(keyboard, layout);
+      if (!definitionFile) saveQmkNames(deviceName, { keyboard, layout });
+      const { file, warnings } = exportVialKeymap(
+        keymapToQmkLayers(keymap, behaviors),
+        matrix
+      );
+      const name = (keyboard.trim() || deviceName).replace(/[/\s]+/g, "_");
+      downloadJson(`${name}_zmk_studio.vil`, file);
+      setExportNames(undefined);
+      if (warnings.length) {
+        setResult({
+          title: "Keymap exported",
+          message: "Load it in Vial with File → Load saved layout.",
+          warnings,
+        });
+      }
+    } catch (e) {
+      setExportNames(
+        (n) => n && { ...n, error: e instanceof Error ? e.message : String(e) }
+      );
+    } finally {
+      setExporting(false);
+    }
   };
 
   // A Vial file waiting for the user to say which keyboard it's from
@@ -192,7 +248,7 @@ export const KeymapFileControls = ({
           type="button"
           className={buttonClass}
           onClick={startExport}
-          title="Export the keymap as a QMK Configurator JSON file"
+          title="Export the keymap as a QMK Configurator (.json) or Vial (.vil) file"
         >
           <Download className="size-4" /> Export
         </button>
@@ -222,10 +278,30 @@ export const KeymapFileControls = ({
           }}
         >
           <h2 className="text-lg">Export Keymap</h2>
+          <fieldset className="flex gap-4 text-sm">
+            {(
+              [
+                ["qmk", "QMK Configurator (.json)"],
+                ["vial", "Vial (.vil)"],
+              ] as const
+            ).map(([format, label]) => (
+              <label key={format} className="flex items-center gap-1">
+                <input
+                  type="radio"
+                  name="exportFormat"
+                  checked={exportNames?.format === format}
+                  onChange={() =>
+                    setExportNames((n) => n && { ...n, format, error: undefined })
+                  }
+                />
+                {label}
+              </label>
+            ))}
+          </fieldset>
           <p className="text-sm opacity-80">
-            Saves a QMK Configurator keymap JSON file. For QMK Configurator to
-            open it, the keyboard and layout must match QMK's names for this
-            keyboard.
+            {exportNames?.format === "vial"
+              ? "Saves a layout file for Vial's File → Load saved layout. Vial stores keys by switch matrix position, so enter QMK's names for the keyboard you'll load it on, or choose its definition file (info.json, keyboard.json or vial.json)."
+              : "Saves a QMK Configurator keymap JSON file. For QMK Configurator to open it, the keyboard and layout must match QMK's names for this keyboard."}
           </p>
           <label className="flex flex-col gap-1 text-sm">
             QMK keyboard
@@ -233,7 +309,9 @@ export const KeymapFileControls = ({
               className={inputClass}
               value={exportNames?.keyboard ?? ""}
               onChange={(e) =>
-                setExportNames((n) => n && { ...n, keyboard: e.target.value })
+                setExportNames(
+                  (n) => n && { ...n, keyboard: e.target.value, error: undefined }
+                )
               }
             />
           </label>
@@ -243,11 +321,26 @@ export const KeymapFileControls = ({
               className={inputClass}
               value={exportNames?.layout ?? ""}
               onChange={(e) =>
-                setExportNames((n) => n && { ...n, layout: e.target.value })
+                setExportNames(
+                  (n) => n && { ...n, layout: e.target.value, error: undefined }
+                )
               }
             />
           </label>
+          {exportNames?.error && (
+            <p className="text-sm text-red-500">{exportNames.error}</p>
+          )}
           <div className="mt-2 flex justify-end gap-3">
+            {exportNames?.format === "vial" && (
+              <button
+                type="button"
+                className={`${dialogButtonClass} mr-auto`}
+                disabled={exporting}
+                onClick={() => exportDefinitionInput.current?.click()}
+              >
+                Choose definition file…
+              </button>
+            )}
             <button
               type="button"
               className={dialogButtonClass}
@@ -255,10 +348,21 @@ export const KeymapFileControls = ({
             >
               Cancel
             </button>
-            <button type="submit" className={primaryButtonClass}>
-              Export
+            <button type="submit" className={primaryButtonClass} disabled={exporting}>
+              {exporting ? "Exporting…" : "Export"}
             </button>
           </div>
+          <input
+            ref={exportDefinitionInput}
+            type="file"
+            accept=".json,application/json"
+            className="hidden"
+            onChange={(e) => {
+              const f = e.target.files?.[0];
+              e.target.value = "";
+              if (f) doExport(f);
+            }}
+          />
         </form>
       </GenericModal>
 

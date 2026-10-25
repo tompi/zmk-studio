@@ -1,10 +1,12 @@
-// Read keymaps saved from Vial (.vil files).
+// Read and write keymaps in Vial's saved layout format (.vil files).
 //
 // Vial stores keys by switch matrix position (layer -> row -> column, -1 where there
 // is no switch), not in layout order. To turn that into ZMK's key order we need the
 // keyboard's matrix map, which comes from QMK's keyboard API or a definition file.
 
 import type { ParsedKeymapFile } from "./qmkJson";
+
+const isZmkOnlyKey = (code: string) => code.startsWith("ZMK(");
 
 type MatrixPos = [number, number];
 
@@ -197,4 +199,56 @@ export function vialToKeymapFile(
   }
 
   return { layers, warnings };
+}
+
+// A .vil file for Vial's "Load saved layout". `layers` are QMK keycodes in key order,
+// placed at matrix positions; Vial turns names it doesn't know into KC_NO, so
+// ZMK-only keys are written as KC_NO up front and reported.
+export function exportVialKeymap(
+  layers: string[][],
+  matrix: MatrixPos[]
+): { file: unknown; warnings: string[] } {
+  const warnings: string[] = [];
+  const rows = Math.max(0, ...matrix.map(([r]) => r + 1));
+  const cols = Math.max(0, ...matrix.map(([, c]) => c + 1));
+
+  const keyCount = layers[0]?.length ?? 0;
+  if (keyCount !== matrix.length) {
+    warnings.push(
+      `The keyboard has ${keyCount} keys but the chosen layout has ${matrix.length}, so keys may be in the wrong place. Check that the keyboard and layout are right.`
+    );
+  }
+
+  let zmkOnly = 0;
+  const layout = layers.map((keys) => {
+    const grid: (string | number)[][] = Array.from({ length: rows }, () =>
+      Array<string | number>(cols).fill(-1)
+    );
+    matrix.forEach(([r, c], i) => {
+      let code = keys[i] ?? "KC_NO";
+      if (isZmkOnlyKey(code)) {
+        zmkOnly++;
+        code = "KC_NO";
+      }
+      grid[r][c] = code;
+    });
+    return grid;
+  });
+
+  if (zmkOnly) {
+    warnings.push(
+      `${zmkOnly} key${zmkOnly === 1 ? " uses a ZMK behavior" : "s use ZMK behaviors"} Vial doesn't have, so ${zmkOnly === 1 ? "it was" : "they were"} saved as KC_NO.`
+    );
+  }
+
+  return {
+    file: {
+      version: 1,
+      layout,
+      encoder_layout: [],
+      // Default choices, which is what the matrix map above assumes
+      layout_options: 0,
+    },
+    warnings,
+  };
 }

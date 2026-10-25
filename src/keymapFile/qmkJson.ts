@@ -168,13 +168,20 @@ export function bindingToQmk(
   return genericBinding(binding, behavior, layerIds);
 }
 
+// Each layer's bindings as QMK keycodes, in key order
+export function keymapToQmkLayers(keymap: Keymap, behaviors: BehaviorMap): string[][] {
+  const layerIds = keymap.layers.map((l) => l.id);
+  return keymap.layers.map((layer) =>
+    layer.bindings.map((b) => bindingToQmk(b, behaviors[b.behaviorId], layerIds))
+  );
+}
+
 export function exportQmkKeymap(
   keymap: Keymap,
   behaviors: BehaviorMap,
   keyboard: string,
   layout: string
 ): QmkKeymapFile {
-  const layerIds = keymap.layers.map((l) => l.id);
 
   return {
     version: 1,
@@ -184,11 +191,7 @@ export function exportQmkKeymap(
     keyboard,
     keymap: `${keyboard.replace(/\//g, "_")}_zmk_studio`,
     layout,
-    layers: keymap.layers.map((layer) =>
-      layer.bindings.map((b) =>
-        bindingToQmk(b, behaviors[b.behaviorId], layerIds)
-      )
-    ),
+    layers: keymapToQmkLayers(keymap, behaviors),
     author: "",
     zmk_studio: { layer_names: keymap.layers.map((l) => l.name) },
   };
