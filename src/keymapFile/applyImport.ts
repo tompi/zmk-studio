@@ -120,16 +120,18 @@ export async function applyImport(
 
     const keyCount = Math.min(codes.length, layer.bindings.length);
     for (let k = 0; k < keyCount; k++) {
+      const code = codes[k];
+      if (code === null) continue;
       let binding: BehaviorBinding;
       try {
-        binding = qmkToBinding(codes[k], ctx);
+        binding = qmkToBinding(code, ctx);
       } catch (e) {
         if (!isImportError(e)) throw e;
         if (noneId === undefined) {
-          warnings.push(`Layer ${li}, key ${k}: ${codes[k]} was skipped, ${e.message}.`);
+          warnings.push(`Layer ${li}, key ${k}: ${code} was skipped, ${e.message}.`);
           continue;
         }
-        warnings.push(`Layer ${li}, key ${k}: ${codes[k]} was set to None, ${e.message}.`);
+        warnings.push(`Layer ${li}, key ${k}: ${code} was set to None, ${e.message}.`);
         binding = { behaviorId: noneId, param1: 0, param2: 0 };
       }
 
@@ -138,7 +140,7 @@ export async function applyImport(
       if (await setBinding(conn, layer.id, k, binding)) {
         oldBindings.push([layer.id, k, old]);
       } else {
-        warnings.push(`Layer ${li}, key ${k}: the keyboard didn't accept ${codes[k]}.`);
+        warnings.push(`Layer ${li}, key ${k}: the keyboard didn't accept ${code}.`);
       }
     }
   }

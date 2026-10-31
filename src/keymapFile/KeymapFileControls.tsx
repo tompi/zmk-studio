@@ -18,12 +18,16 @@ import {
 import {
   MatrixPos,
   exportVialKeymap,
+  fetchQmkLayout,
   fetchQmkMatrix,
+  layoutFromDefinitionFile,
   matrixFromDefinitionFile,
   matrixFromPositions,
   VialFile,
   vialToKeymapFile,
 } from "./vial";
+import { fitKeymapToKeyboard } from "./fitKeymap";
+import { fromPhysicalKeys } from "./remap";
 
 export interface ImportSummary {
   changedKeys: number;
@@ -105,6 +109,11 @@ export const KeymapFileControls = ({
   onImport,
 }: KeymapFileControlsProps) => {
   const keyCount = physicalKeys.length;
+  // Saved in exports so they can be imported on a keyboard with a different layout
+  const exportKeys =
+    keyCount && keyCount === keymap.layers[0]?.bindings.length
+      ? fromPhysicalKeys(physicalKeys)
+      : undefined;
   const fileInput = useRef<HTMLInputElement>(null);
 
   const [exportNames, setExportNames] = useState<
@@ -135,7 +144,7 @@ export const KeymapFileControls = ({
 
     if (format === "qmk") {
       saveQmkNames(deviceName, { keyboard, layout });
-      const file = exportQmkKeymap(keymap, behaviors, keyboard, layout);
+      const file = exportQmkKeymap(keymap, behaviors, keyboard, layout, exportKeys);
       downloadJson(`${file.keymap}.json`, file);
       setExportNames(undefined);
       return;
@@ -159,7 +168,8 @@ export const KeymapFileControls = ({
       }
       const exported = exportVialKeymap(
         keymapToQmkLayers(keymap, behaviors),
-        matrix
+        matrix,
+        exportKeys
       );
       const { file } = exported;
       const warnings = lookupFailed
@@ -197,7 +207,9 @@ export const KeymapFileControls = ({
 
   const runImport = async (file: ParsedKeymapFile) => {
     try {
-      const { changedKeys, warnings } = await onImport(file);
+      const { changedKeys, warnings } = await onImport(
+        await fitKeymapToKeyboard(file, physicalKeys)
+      );
       setResult({
         title: "Keymap imported",
         message: `${changedKeys} key${changedKeys === 1 ? "" : "s"} changed. Save to keep the changes on the keyboard, or use undo to go back.`,
@@ -218,7 +230,9 @@ export const KeymapFileControls = ({
       const contents = parseKeymapFile(await f.text());
       if (contents.kind === "vial" && contents.vial.matrix) {
         // Exported by ZMK Studio, which stored the matrix map in the file
-        await runImport(vialToKeymapFile(contents.vial, contents.vial.matrix));
+        await runImport(
+          vialToKeymapFile(contents.vial, contents.vial.matrix, contents.vial.keys)
+        );
       } else if (contents.kind === "vial") {
         setVial({
           file: contents.vial,
@@ -243,13 +257,13 @@ export const KeymapFileControls = ({
     if (!vial) return;
     setImporting(true);
     try {
-      const matrix = definitionFile
-        ? matrixFromDefinitionFile(await definitionFile.text(), vial.layout)
-        : await fetchQmkMatrix(vial.keyboard, vial.layout);
+      const layout = definitionFile
+        ? layoutFromDefinitionFile(await definitionFile.text(), vial.layout)
+        : await fetchQmkLayout(vial.keyboard, vial.layout);
       if (!definitionFile) {
         saveQmkNames(deviceName, { keyboard: vial.keyboard, layout: vial.layout });
       }
-      const file = vialToKeymapFile(vial.file, matrix);
+      const file = vialToKeymapFile(vial.file, layout.matrix, layout.keys);
       setVial(undefined);
       await runImport(file);
     } catch (e) {

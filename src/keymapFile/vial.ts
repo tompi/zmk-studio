@@ -6,6 +6,7 @@
 
 import type { KeyPhysicalAttrs } from "@zmkfirmware/zmk-studio-ts-client/keymap";
 import type { ParsedKeymapFile } from "./qmkJson";
+import { KeyGeom, packKeys, unpackKeys } from "./remap";
 
 const isZmkOnlyKey = (code: string) => code.startsWith("ZMK(");
 
@@ -17,6 +18,8 @@ export interface VialFile {
   // Key order -> matrix position, stored by ZMK Studio's export so it can import
   // the file again without looking up the keyboard. Vial ignores it.
   matrix?: MatrixPos[];
+  // Where each key sits, also stored by ZMK Studio's export
+  keys?: KeyGeom[];
 }
 
 export function isVialFile(json: unknown): boolean {
@@ -41,7 +44,7 @@ export function readVialFile(json: unknown): VialFile {
   const j = json as {
     layout: VialFile["layout"];
     encoder_layout?: unknown;
-    zmk_studio?: { matrix?: unknown };
+    zmk_studio?: { matrix?: unknown; keys?: unknown };
   };
   const matrix = j.zmk_studio?.matrix;
   return {
@@ -50,6 +53,7 @@ export function readVialFile(json: unknown): VialFile {
       ? (j.encoder_layout as VialFile["encoderLayout"])
       : undefined,
     matrix: isMatrix(matrix) ? matrix : undefined,
+    keys: unpackKeys(j.zmk_studio?.keys),
   };
 }
 
@@ -81,35 +85,60 @@ export function matrixFromPositions(keys: KeyPhysicalAttrs[]): MatrixPos[] {
   return matrix;
 }
 
-// Built in so Corne works offline. Same data as QMK's crkbd/rev1 info.json.
-const CORNE_LEFT = (cols: number[]) => [0, 1, 2].map((r) => cols.map((c) => [r, c]));
-const builtIn = (from: number): MatrixPos[] => {
-  const left = [...Array(6 - from).keys()].map((i) => i + from);
-  const right = [...left].reverse();
-  const rows = CORNE_LEFT(left).flatMap((row, r) => [
-    ...row,
-    ...right.map((c) => [r + 4, c]),
-  ]);
-  return [
-    ...rows,
-    [3, 3], [3, 4], [3, 5],
-    [7, 5], [7, 4], [7, 3],
-  ] as MatrixPos[];
+// Built in so Corne works offline. Same data as QMK's crkbd/rev1 info.json:
+// [row, col, x, y] per key, in layout order.
+const corne = (cols: number, keys: number[][]): QmkLayout => ({
+  matrix: keys.map(([r, c]) => [r, c]),
+  keys: keys.map(([, , x, y]) => ({ x: x - (6 - cols), y })),
+});
+const corneHalves = (from: number) => {
+  const ys = [0.3, 0.3, 0.1, 0, 0.1, 0.2];
+  const keys: number[][] = [];
+  for (let r = 0; r < 3; r++) {
+    for (let c = from; c < 6; c++) keys.push([r, c, c, r + ys[c]]);
+    for (let c = 5; c >= from; c--) keys.push([r + 4, c, 14 - c, r + ys[c]]);
+  }
+  keys.push(
+    [3, 3, 4, 3.7], [3, 4, 5, 3.7], [3, 5, 6, 3.2],
+    [7, 5, 8, 3.2], [7, 4, 9, 3.7], [7, 3, 10, 3.7]
+  );
+  return corne(6 - from, keys);
 };
-const BUILT_IN: Record<string, Record<string, MatrixPos[]>> = {
+const BUILT_IN: Record<string, Record<string, QmkLayout>> = {
   "crkbd/rev1": {
-    LAYOUT_split_3x6_3: builtIn(0),
-    LAYOUT_split_3x5_3: builtIn(1),
-    LAYOUT: builtIn(0),
+    LAYOUT_split_3x6_3: corneHalves(0),
+    LAYOUT_split_3x5_3: corneHalves(1),
+    LAYOUT: corneHalves(0),
   },
 };
 
+// A built-in layout with this many keys, to guess what an unnamed file is for
+export function builtInLayoutForKeyCount(
+  keyCount: number
+): { keyboard: string; layout: string; data: QmkLayout } | undefined {
+  for (const [keyboard, layouts] of Object.entries(BUILT_IN)) {
+    for (const [layout, data] of Object.entries(layouts)) {
+      if (layout !== "LAYOUT" && data.matrix.length === keyCount) {
+        return { keyboard, layout, data };
+      }
+    }
+  }
+  return undefined;
+}
+
+// A keyboard layout's keys in layout order: switch matrix position, and where the
+// key sits if known
+export interface QmkLayout {
+  matrix: MatrixPos[];
+  keys?: KeyGeom[];
+}
+
 interface QmkInfo {
-  layouts?: Record<string, { layout: { matrix: MatrixPos }[] }>;
+  layouts?: Record<string, { layout: ({ matrix: MatrixPos } & KeyGeom)[] }>;
   layout_aliases?: Record<string, string>;
 }
 
-function matrixFromQmkInfo(info: QmkInfo, layoutName: string): MatrixPos[] {
+function layoutFromQmkInfo(info: QmkInfo, layoutName: string): QmkLayout {
   const layouts = info.layouts ?? {};
   const name = layouts[layoutName]
     ? layoutName
@@ -120,14 +149,24 @@ function matrixFromQmkInfo(info: QmkInfo, layoutName: string): MatrixPos[] {
       `The keyboard has no layout "${layoutName}". Available: ${Object.keys(layouts).join(", ") || "none"}.`
     );
   }
-  return layout.layout.map((k) => k.matrix);
+  const keys = layout.layout;
+  return {
+    matrix: keys.map((k) => k.matrix),
+    keys: keys.every((k) => typeof k.x === "number" && typeof k.y === "number")
+      ? keys.map(({ x, y, w, h, r, rx, ry }) => ({ x, y, w, h, r, rx, ry }))
+      : undefined,
+  };
 }
 
 // Matrix map from QMK's keyboard API, e.g. keyboard "crkbd/rev1", layout "LAYOUT_split_3x6_3"
-export async function fetchQmkMatrix(
+export async function fetchQmkMatrix(keyboard: string, layout: string) {
+  return (await fetchQmkLayout(keyboard, layout)).matrix;
+}
+
+export async function fetchQmkLayout(
   keyboard: string,
   layout: string
-): Promise<MatrixPos[]> {
+): Promise<QmkLayout> {
   const kb = keyboard.trim().replace(/^\/+|\/+$/g, "");
   let info: QmkInfo | undefined;
   try {
@@ -145,7 +184,7 @@ export async function fetchQmkMatrix(
     // Offline: fall back to the built-in maps below
   }
 
-  if (info) return matrixFromQmkInfo(info, layout);
+  if (info) return layoutFromQmkInfo(info, layout);
 
   const builtIn = BUILT_IN[kb]?.[layout];
   if (builtIn) return builtIn;
@@ -156,16 +195,47 @@ export async function fetchQmkMatrix(
 
 // KLE-style vial.json: each key's first legend is "row,col". Keys that are a
 // non-default choice of a layout option have "option,choice" as legend 8.
-function matrixFromVialJson(keymap: unknown[][]): MatrixPos[] {
-  const out: MatrixPos[] = [];
-  let decal = false;
+// Positions follow KLE's rules: x/y are offsets, r/rx/ry carry over between rows.
+function layoutFromVialJson(keymap: unknown[][]): QmkLayout {
+  const matrix: MatrixPos[] = [];
+  const keys: KeyGeom[] = [];
+  let r = 0;
+  let rx = 0;
+  let ry = 0;
+  let y = 0;
   for (const row of keymap) {
+    if (!Array.isArray(row)) continue;
+    let x = rx;
+    let w = 1;
+    let h = 1;
+    let decal = false;
     for (const item of row) {
       if (typeof item === "object" && item !== null) {
-        decal = !!(item as { d?: boolean }).d;
+        const p = item as Record<string, unknown>;
+        const num = (k: string) => (typeof p[k] === "number" ? (p[k] as number) : undefined);
+        if (num("r") !== undefined) r = num("r")!;
+        if (num("rx") !== undefined) {
+          rx = num("rx")!;
+          x = rx;
+          y = ry;
+        }
+        if (num("ry") !== undefined) {
+          ry = num("ry")!;
+          x = rx;
+          y = ry;
+        }
+        x += num("x") ?? 0;
+        y += num("y") ?? 0;
+        w = num("w") ?? w;
+        h = num("h") ?? h;
+        decal = !!p.d;
         continue;
       }
       if (typeof item !== "string") continue;
+      const key = { x, y, w, h, r, rx, ry };
+      x += w;
+      w = 1;
+      h = 1;
       const isDecal = decal;
       decal = false;
       if (isDecal) continue;
@@ -175,17 +245,23 @@ function matrixFromVialJson(keymap: unknown[][]): MatrixPos[] {
       if (!m) continue;
       const option = /^\d+,(\d+)$/.exec(legends[8]?.trim() ?? "");
       if (option && option[1] !== "0") continue;
-      out.push([Number(m[1]), Number(m[2])]);
+      matrix.push([Number(m[1]), Number(m[2])]);
+      keys.push(key);
     }
+    y += 1;
   }
-  return out;
+  return { matrix, keys };
 }
 
 // Matrix map from a QMK info.json / keyboard.json (or the QMK API's wrapped form), or a vial.json
-export function matrixFromDefinitionFile(
+export function matrixFromDefinitionFile(text: string, layoutName: string) {
+  return layoutFromDefinitionFile(text, layoutName).matrix;
+}
+
+export function layoutFromDefinitionFile(
   text: string,
   layoutName: string
-): MatrixPos[] {
+): QmkLayout {
   let json: {
     keyboards?: Record<string, QmkInfo>;
     layouts?: QmkInfo["layouts"] | { keymap?: unknown[][] };
@@ -198,12 +274,12 @@ export function matrixFromDefinitionFile(
 
   const vialKeymap = (json.layouts as { keymap?: unknown[][] } | undefined)?.keymap;
   if (Array.isArray(vialKeymap)) {
-    const matrix = matrixFromVialJson(vialKeymap);
-    if (matrix.length) return matrix;
+    const layout = layoutFromVialJson(vialKeymap);
+    if (layout.matrix.length) return layout;
   }
 
   const info = json.keyboards ? Object.values(json.keyboards)[0] : (json as QmkInfo);
-  if (info?.layouts) return matrixFromQmkInfo(info, layoutName);
+  if (info?.layouts) return layoutFromQmkInfo(info, layoutName);
 
   throw new Error(
     "The definition file doesn't look like a QMK info.json, keyboard.json or vial.json."
@@ -215,7 +291,8 @@ const isEmptyKey = (k: string) => k === "KC_TRNS" || k === "KC_NO";
 // Turn a Vial keymap into layers in layout order
 export function vialToKeymapFile(
   vial: VialFile,
-  matrix: MatrixPos[]
+  matrix: MatrixPos[],
+  keys?: KeyGeom[]
 ): ParsedKeymapFile {
   const warnings: string[] = [];
   const isKey = (code: unknown): code is string => typeof code === "string";
@@ -246,7 +323,11 @@ export function vialToKeymapFile(
     warnings.push("Encoder mappings from Vial aren't imported.");
   }
 
-  return { layers, warnings };
+  return {
+    layers,
+    warnings,
+    keys: keys?.length === matrix.length ? keys : undefined,
+  };
 }
 
 // A .vil file for Vial's "Load saved layout". `layers` are QMK keycodes in key order,
@@ -254,7 +335,8 @@ export function vialToKeymapFile(
 // ZMK-only keys are written as KC_NO up front and reported.
 export function exportVialKeymap(
   layers: string[][],
-  matrix: MatrixPos[]
+  matrix: MatrixPos[],
+  keys?: KeyGeom[]
 ): { file: unknown; warnings: string[] } {
   const warnings: string[] = [];
   const rows = Math.max(0, ...matrix.map(([r]) => r + 1));
@@ -296,7 +378,7 @@ export function exportVialKeymap(
       encoder_layout: [],
       // Default choices, which is what the matrix map above assumes
       layout_options: 0,
-      zmk_studio: { matrix },
+      zmk_studio: { matrix, keys: keys && packKeys(keys) },
     },
     warnings,
   };

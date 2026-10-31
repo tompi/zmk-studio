@@ -11,6 +11,7 @@ import type {
 } from "@zmkfirmware/zmk-studio-ts-client/keymap";
 import { validateValue } from "../behaviors/parameters";
 import { isVialFile, readVialFile, VialFile } from "./vial";
+import { KeyGeom, packKeys, unpackKeys } from "./remap";
 import {
   MOD_BITS,
   MOD_NAMES,
@@ -33,7 +34,7 @@ export interface QmkKeymapFile {
   layers: string[][];
   author: string;
   // Extra ZMK Studio data; QMK Configurator ignores it
-  zmk_studio?: { layer_names?: string[] };
+  zmk_studio?: { layer_names?: string[]; keys?: number[][] };
 }
 
 // Behavior display names as ZMK reports them
@@ -180,9 +181,9 @@ export function exportQmkKeymap(
   keymap: Keymap,
   behaviors: BehaviorMap,
   keyboard: string,
-  layout: string
+  layout: string,
+  keys?: KeyGeom[]
 ): QmkKeymapFile {
-
   return {
     version: 1,
     notes: "Exported from ZMK Studio",
@@ -193,7 +194,11 @@ export function exportQmkKeymap(
     layout,
     layers: keymapToQmkLayers(keymap, behaviors),
     author: "",
-    zmk_studio: { layer_names: keymap.layers.map((l) => l.name) },
+    zmk_studio: {
+      layer_names: keymap.layers.map((l) => l.name),
+      // Where each key sits, so the keymap can be imported on a different keyboard
+      keys: keys && packKeys(keys),
+    },
   };
 }
 
@@ -366,8 +371,14 @@ export function isImportError(e: unknown): e is Error {
 }
 
 export interface ParsedKeymapFile {
-  layers: string[][];
+  // Keycodes in key order. null leaves the keyboard's key as it is.
+  layers: (string | null)[][];
   layerNames?: string[];
+  // Where each key in the file sits, if known
+  keys?: KeyGeom[];
+  // The QMK keyboard and layout the file says it's for
+  keyboard?: string;
+  layout?: string;
   // Problems found while reading the file, shown along with the import result
   warnings?: string[];
 }
@@ -411,6 +422,9 @@ export function parseKeymapFile(text: string): KeymapFileContents {
         Array.isArray(names) && names.every((n) => typeof n === "string")
           ? names
           : undefined,
+      keys: unpackKeys(file.zmk_studio?.keys),
+      keyboard: typeof file.keyboard === "string" ? file.keyboard : undefined,
+      layout: typeof file.layout === "string" ? file.layout : undefined,
     },
   };
 }
