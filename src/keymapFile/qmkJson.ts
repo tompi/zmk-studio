@@ -209,6 +209,7 @@ const KNOWN_KEYBOARDS: [RegExp, number, string, string][] = [
   [/lily58/i, 58, "lily58/rev1", "LAYOUT"],
   [/sofle/i, 58, "sofle/rev1", "LAYOUT"],
   [/kyria/i, 50, "splitkb/kyria/rev3", "LAYOUT"],
+  [/cheapino|expensivo/i, 37, "cheapino", "LAYOUT_split_3x5_3"],
 ];
 
 export function guessQmkKeyboard(
