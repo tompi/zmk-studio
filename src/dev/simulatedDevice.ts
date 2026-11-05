@@ -1,5 +1,5 @@
-// A fake ZMK Studio device for debugging the UI without a keyboard attached.
-// Only offered when running the Vite dev server (see App.tsx).
+// A fake ZMK Studio device for trying out the UI without a keyboard attached
+// (offered in the connect dialog, see App.tsx).
 //
 // It speaks the real RPC protocol (framed protobuf messages) over in-memory
 // streams, so the rest of the app can't tell it apart from a real keyboard.

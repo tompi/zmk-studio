@@ -64,25 +64,21 @@ const TRANSPORTS: TransportFactory[] = [
         },
       ]
     : []),
-  // A fake keyboard for debugging the UI locally, only offered by the dev server
-  ...(import.meta.env.DEV
-    ? [
-        window.__TAURI_INTERNALS__
-          ? {
-              label: "Simulated",
-              pick_and_connect: {
-                list: async () => [{ label: "Corne (simulated)", id: "simulated" }],
-                connect: async () =>
-                  (await import("./dev/simulatedDevice")).connect(),
-              },
-            }
-          : {
-              label: "Simulated",
-              connect: async () =>
-                (await import("./dev/simulatedDevice")).connect(),
-            },
-      ]
-    : []),
+  // A fake keyboard, for trying out the app without one plugged in
+  window.__TAURI_INTERNALS__
+    ? {
+        label: "Simulated",
+        isSimulated: true,
+        pick_and_connect: {
+          list: async () => [{ label: "Corne (simulated)", id: "simulated" }],
+          connect: async () => (await import("./dev/simulatedDevice")).connect(),
+        },
+      }
+    : {
+        label: "Simulated",
+        isSimulated: true,
+        connect: async () => (await import("./dev/simulatedDevice")).connect(),
+      },
 ].filter((t) => t !== undefined);
 
 async function listen_for_notifications(

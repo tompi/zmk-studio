@@ -12,6 +12,8 @@ import { GenericModal } from "./GenericModal";
 export type TransportFactory = {
   label: string;
   isWireless?: boolean;
+  // A fake keyboard, which works in any browser
+  isSimulated?: boolean;
   connect?: () => Promise<RpcTransport>;
   pick_and_connect?: {
     list: () => Promise<Array<AvailableDevice>>;
@@ -280,14 +282,31 @@ export const ConnectModal = ({
 }: ConnectModalProps) => {
   const dialog = useModalRef(open || false, false, false);
 
-  const haveTransports = useMemo(() => transports.length > 0, [transports]);
+  const haveTransports = useMemo(
+    () => transports.some((t) => !t.isSimulated),
+    [transports]
+  );
+  const simulated = useMemo(
+    () => transports.filter((t) => t.isSimulated),
+    [transports]
+  );
 
   return (
     <GenericModal ref={dialog} className="max-w-xl">
       <h1 className="text-xl">Welcome to ZMK Studio</h1>
-      {haveTransports
-        ? connectOptions(transports, onTransportCreated, open)
-        : noTransportsOptionsPrompt()}
+      {haveTransports ? (
+        connectOptions(transports, onTransportCreated, open)
+      ) : (
+        <>
+          {noTransportsOptionsPrompt()}
+          {simulated.length > 0 && (
+            <div className="m-4 mt-0">
+              <p>Or try it out with a simulated keyboard:</p>
+              {simpleDevicePicker(simulated, onTransportCreated)}
+            </div>
+          )}
+        </>
+      )}
     </GenericModal>
   );
 };
