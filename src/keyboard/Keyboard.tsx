@@ -37,6 +37,9 @@ import {
 } from "../keymapFile/KeymapFileControls";
 import { applyImport } from "../keymapFile/applyImport";
 import type { ParsedKeymapFile } from "../keymapFile/qmkJson";
+import { KeyPalette } from "./KeyPalette";
+import { findKeyPress } from "./keyCodes";
+import { useKeyCapture } from "./useKeyCapture";
 
 type BehaviorMap = Record<number, GetBehaviorDetailsResponse>;
 
@@ -240,18 +243,15 @@ export default function Keyboard({ deviceName }: KeyboardProps) {
     [undoRedo, selectedPhysicalLayoutIndex]
   );
 
-  let doUpdateBinding = useCallback(
-    (binding: BehaviorBinding) => {
-      if (!keymap || selectedKeyPosition === undefined) {
-        console.error(
-          "Can't update binding without a selected key position and loaded keymap"
-        );
+  const setBindingAt = useCallback(
+    (keyPosition: number, binding: BehaviorBinding) => {
+      if (!keymap) {
+        console.error("Can't update binding without a loaded keymap");
         return;
       }
 
       const layer = selectedLayerIndex;
       const layerId = keymap.layers[layer].id;
-      const keyPosition = selectedKeyPosition;
       const oldBinding = keymap.layers[layer].bindings[keyPosition];
       undoRedo?.(async () => {
         if (!conn.conn) {
@@ -299,7 +299,39 @@ export default function Keyboard({ deviceName }: KeyboardProps) {
         };
       });
     },
-    [conn, keymap, undoRedo, selectedLayerIndex, selectedKeyPosition]
+    [conn, keymap, undoRedo, selectedLayerIndex]
+  );
+
+  const doUpdateBinding = useCallback(
+    (binding: BehaviorBinding) => {
+      if (selectedKeyPosition === undefined) {
+        console.error("Can't update binding without a selected key position");
+        return;
+      }
+      setBindingAt(selectedKeyPosition, binding);
+    },
+    [setBindingAt, selectedKeyPosition]
+  );
+
+  // Set the selected key from the palette or by typing, then move on to the next
+  // key so a whole layer can be filled in quickly (like QMK Configurator)
+  const keyCount = layouts?.[selectedPhysicalLayoutIndex]?.keys.length ?? 0;
+  const pickBinding = useCallback(
+    (binding: BehaviorBinding) => {
+      if (selectedKeyPosition === undefined) return;
+      setBindingAt(selectedKeyPosition, binding);
+      if (selectedKeyPosition + 1 < keyCount) {
+        setSelectedKeyPosition(selectedKeyPosition + 1);
+      }
+    },
+    [setBindingAt, selectedKeyPosition, keyCount]
+  );
+
+  const keyPress = useMemo(() => findKeyPress(behaviors), [behaviors]);
+  useKeyCapture(
+    selectedKeyPosition !== undefined && !!keyPress && !!keymap,
+    (usage) =>
+      keyPress && pickBinding({ behaviorId: keyPress.id, param1: usage, param2: 0 })
   );
 
   let selectedBinding = useMemo(() => {
@@ -309,6 +341,15 @@ export default function Keyboard({ deviceName }: KeyboardProps) {
 
     return keymap.layers[selectedLayerIndex].bindings[selectedKeyPosition];
   }, [keymap, selectedLayerIndex, selectedKeyPosition]);
+
+  const layerChoices = useMemo(
+    () =>
+      keymap?.layers.map(({ id, name }, li) => ({
+        id,
+        name: name || li.toLocaleString(),
+      })) ?? [],
+    [keymap]
+  );
 
   const moveLayer = useCallback(
     (start: number, end: number) => {
@@ -602,16 +643,21 @@ export default function Keyboard({ deviceName }: KeyboardProps) {
           </select>
         </div>
       )}
-      {keymap && selectedBinding && (
-        <div className="p-2 col-start-2 row-start-2 bg-base-200">
-          <BehaviorBindingPicker
-            binding={selectedBinding}
-            behaviors={Object.values(behaviors)}
-            layers={keymap.layers.map(({ id, name }, li) => ({
-              id,
-              name: name || li.toLocaleString(),
-            }))}
-            onBindingChanged={doUpdateBinding}
+      {keymap && (
+        <div className="p-2 col-start-2 row-start-2 bg-base-200 flex flex-col gap-3 min-w-0 overflow-auto max-h-[50vh]">
+          {selectedBinding && (
+            <BehaviorBindingPicker
+              binding={selectedBinding}
+              behaviors={Object.values(behaviors)}
+              layers={layerChoices}
+              onBindingChanged={doUpdateBinding}
+            />
+          )}
+          <KeyPalette
+            behaviors={behaviors}
+            layers={layerChoices}
+            selectedBinding={selectedBinding}
+            onPick={pickBinding}
           />
         </div>
       )}
