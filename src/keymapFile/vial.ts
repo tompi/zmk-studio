@@ -104,13 +104,59 @@ const corneHalves = (from: number) => {
   );
   return corne(6 - from, keys);
 };
+// Cheapino (Vial only, not in QMK's API), and the Expensivo, its ZMK cousin with the
+// same keys. Matrix and positions as in its keyboard.json, but in ZMK's key order:
+// rows left to right, then the thumb keys, then the encoder push. QMK puts the
+// encoder push between the halves of the top row instead.
+const cheapino = (): QmkLayout => {
+  const ys = [0.25, 0.125, 0, 0.125, 0.25];
+  const keys: number[][] = [];
+  for (let r = 0; r < 3; r++) {
+    for (let c = 0; c < 5; c++) keys.push([r + 4, 10 - c, c, r + ys[c]]);
+    for (let c = 0; c < 5; c++) keys.push([r, c, c + 7, r + ys[4 - c]]);
+  }
+  keys.push(
+    [6, 11, 2.5, 3.25], [5, 11, 3.5, 3.5], [4, 11, 4.5, 3.75],
+    [0, 5, 6.5, 3.75], [1, 5, 7.5, 3.5], [2, 5, 8.5, 3.25],
+    [3, 0, 6, 0.25]
+  );
+  return { matrix: keys.map(([r, c]) => [r, c]), keys: keys.map(([, , x, y]) => ({ x, y })) };
+};
 const BUILT_IN: Record<string, Record<string, QmkLayout>> = {
   "crkbd/rev1": {
     LAYOUT_split_3x6_3: corneHalves(0),
     LAYOUT_split_3x5_3: corneHalves(1),
     LAYOUT: corneHalves(0),
   },
+  cheapino: {
+    LAYOUT_split_3x5_3: cheapino(),
+    LAYOUT: cheapino(),
+  },
 };
+
+// The built-in layout whose switches are exactly the matrix positions a Vial file
+// uses, so files from those keyboards import without asking which keyboard they're for
+export function builtInLayoutForVialFile(
+  vial: VialFile
+): { keyboard: string; layout: string; data: QmkLayout } | undefined {
+  const used = new Set<string>();
+  vial.layout[0]?.forEach((row, r) =>
+    row.forEach((code, c) => typeof code === "string" && used.add(`${r},${c}`))
+  );
+  if (!used.size) return undefined;
+  for (const [keyboard, layouts] of Object.entries(BUILT_IN)) {
+    for (const [layout, data] of Object.entries(layouts)) {
+      if (
+        layout !== "LAYOUT" &&
+        data.matrix.length === used.size &&
+        data.matrix.every(([r, c]) => used.has(`${r},${c}`))
+      ) {
+        return { keyboard, layout, data };
+      }
+    }
+  }
+  return undefined;
+}
 
 // A built-in layout with this many keys, to guess what an unnamed file is for
 export function builtInLayoutForKeyCount(
@@ -177,6 +223,9 @@ export async function fetchQmkLayout(
       const json = await resp.json();
       info = json?.keyboards?.[kb] ?? Object.values(json?.keyboards ?? {})[0];
     } else if (resp.status === 404) {
+      // Some keyboards are only in Vial, which has no API
+      const builtIn = BUILT_IN[kb]?.[layout];
+      if (builtIn) return builtIn;
       throw new Error(`QMK doesn't know a keyboard called "${kb}".`);
     }
   } catch (e) {

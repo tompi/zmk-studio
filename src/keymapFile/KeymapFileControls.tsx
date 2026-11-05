@@ -16,6 +16,7 @@ import {
   ParsedKeymapFile,
 } from "./qmkJson";
 import {
+  builtInLayoutForVialFile,
   MatrixPos,
   exportVialKeymap,
   fetchQmkLayout,
@@ -233,6 +234,17 @@ export const KeymapFileControls = ({
         await runImport(
           vialToKeymapFile(contents.vial, contents.vial.matrix, contents.vial.keys)
         );
+      } else if (contents.kind === "vial" && builtInLayoutForVialFile(contents.vial)) {
+        // A keyboard ZMK Studio knows, recognised by which switches the file uses
+        const { keyboard, data } = builtInLayoutForVialFile(contents.vial)!;
+        const file = vialToKeymapFile(contents.vial, data.matrix, data.keys);
+        await runImport({
+          ...file,
+          warnings: [
+            `Read as a keymap for a ${keyboard} (Vial files don't say which keyboard they're from).`,
+            ...(file.warnings ?? []),
+          ],
+        });
       } else if (contents.kind === "vial") {
         setVial({
           file: contents.vial,
