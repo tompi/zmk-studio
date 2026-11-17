@@ -40,6 +40,7 @@ import type { ParsedKeymapFile } from "../keymapFile/qmkJson";
 import { KeyPalette } from "./KeyPalette";
 import { findKeyPress } from "./keyCodes";
 import { useKeyCapture } from "./useKeyCapture";
+import { BehaviorSettingsButton } from "../behaviors/BehaviorSettings";
 
 type BehaviorMap = Record<number, GetBehaviorDetailsResponse>;
 
@@ -602,7 +603,8 @@ export default function Keyboard({ deviceName }: KeyboardProps) {
         )}
 
         {keymap && layouts && (
-          <div className="mt-auto">
+          <div className="mt-auto flex flex-col gap-1">
+            <BehaviorSettingsButton behaviors={behaviors} />
             <KeymapFileControls
               keymap={keymap}
               behaviors={behaviors}

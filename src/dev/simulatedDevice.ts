@@ -10,8 +10,10 @@ import { get_decoder, get_encoder } from "@zmkfirmware/zmk-studio-ts-client/fram
 import type { RpcTransport } from "@zmkfirmware/zmk-studio-ts-client/transport/index";
 import type {
   BehaviorParameterValueDescription,
+  BehaviorSetting,
   GetBehaviorDetailsResponse,
 } from "@zmkfirmware/zmk-studio-ts-client/behaviors";
+import { SetBehaviorSettingResponse } from "@zmkfirmware/zmk-studio-ts-client/behaviors";
 import type {
   BehaviorBinding,
   KeyPhysicalAttrs,
@@ -130,6 +132,39 @@ const BEHAVIORS: GetBehaviorDetailsResponse[] = [
   { id: B.STUDIO_UNLOCK, displayName: "Studio Unlock", metadata: [] },
 ];
 
+// Runtime settings, like those of ZMK's hold-tap (behavior_hold_tap.c)
+const ms = (min: number, max: number) => ({ range: { min, max, unit: "ms" } });
+function holdTapSettings(tappingTerm: number, flavor: number): BehaviorSetting[] {
+  return [
+    { id: 0, name: "Tapping term", value: tappingTerm, defaultValue: tappingTerm, ...ms(0, 2000) },
+    { id: 1, name: "Quick tap", value: 0, defaultValue: 0, ...ms(0, 1000) },
+    { id: 2, name: "Require prior idle", value: 0, defaultValue: 0, ...ms(0, 1000) },
+    {
+      id: 3,
+      name: "Flavor",
+      value: flavor,
+      defaultValue: flavor,
+      options: {
+        options: ["Hold-preferred", "Balanced", "Tap-preferred", "Tap-unless-interrupted"],
+      },
+    },
+    { id: 4, name: "Hold trigger on release", value: 0, defaultValue: 0, toggle: {} },
+    { id: 5, name: "Retro tap", value: 0, defaultValue: 0, toggle: {} },
+  ];
+}
+
+function defaultSettings(): Record<number, BehaviorSetting[]> {
+  // Same defaults as ZMK's &mt and &lt
+  return { [B.MT]: holdTapSettings(200, 2), [B.LT]: holdTapSettings(200, 0) };
+}
+
+function isValidSettingValue(s: BehaviorSetting, v: number) {
+  if (s.range) return v >= s.range.min && v <= s.range.max;
+  if (s.options) return v >= 0 && v < s.options.options.length;
+  if (s.toggle) return v === 0 || v === 1;
+  return false;
+}
+
 // ---------- Default keymap ----------
 
 // HID keyboard usages (page 7)
@@ -227,6 +262,8 @@ const clone = <T>(v: T): T => structuredClone(v);
 class SimulatedDevice {
   private savedLayers = defaultLayers();
   private layers = clone(this.savedLayers);
+  private savedSettings = defaultSettings();
+  private settings = clone(this.savedSettings);
   // Removed layers, kept so "undo" (restore layer) can bring them back
   private removedLayers = new Map<number, Layer>();
   private nextLayerId = 100;
@@ -245,9 +282,15 @@ class SimulatedDevice {
 
   // Tell the app whether there are unsaved changes, right after the
   // response to the current request has been sent
+  private hasUnsavedChanges() {
+    return (
+      JSON.stringify(this.layers) !== JSON.stringify(this.savedLayers) ||
+      JSON.stringify(this.settings) !== JSON.stringify(this.savedSettings)
+    );
+  }
+
   private changed() {
-    const unsaved =
-      JSON.stringify(this.layers) !== JSON.stringify(this.savedLayers);
+    const unsaved = this.hasUnsavedChanges();
     queueMicrotask(() =>
       this.notify({
         notification: { keymap: { unsavedChangesStatusChanged: unsaved } },
@@ -291,6 +334,8 @@ class SimulatedDevice {
       if (core.resetSettings) {
         this.savedLayers = defaultLayers();
         this.layers = clone(this.savedLayers);
+        this.savedSettings = defaultSettings();
+        this.settings = clone(this.savedSettings);
         this.changed();
         return { core: { resetSettings: true } };
       }
@@ -315,6 +360,56 @@ class SimulatedDevice {
         return details
           ? { behaviors: { getBehaviorDetails: clone(details) } }
           : { meta: { simpleError: ErrorConditions.GENERIC } };
+      }
+      if (behaviors.getBehaviorSettings) {
+        const id = behaviors.getBehaviorSettings.behaviorId;
+        if (!BEHAVIORS.some((b) => b.id === id)) {
+          return { meta: { simpleError: ErrorConditions.GENERIC } };
+        }
+        return {
+          behaviors: {
+            getBehaviorSettings: {
+              behaviorId: id,
+              settings: clone(this.settings[id] ?? []),
+            },
+          },
+        };
+      }
+      if (behaviors.setBehaviorSetting) {
+        const { behaviorId, settingId, value } = behaviors.setBehaviorSetting;
+        const settings = this.settings[behaviorId];
+        if (!settings) {
+          return {
+            behaviors: {
+              setBehaviorSetting:
+                SetBehaviorSettingResponse.SET_BEHAVIOR_SETTING_RESP_INVALID_BEHAVIOR,
+            },
+          };
+        }
+        const setting = settings.find((s) => s.id === settingId);
+        if (!setting) {
+          return {
+            behaviors: {
+              setBehaviorSetting:
+                SetBehaviorSettingResponse.SET_BEHAVIOR_SETTING_RESP_INVALID_SETTING,
+            },
+          };
+        }
+        if (!isValidSettingValue(setting, value)) {
+          return {
+            behaviors: {
+              setBehaviorSetting:
+                SetBehaviorSettingResponse.SET_BEHAVIOR_SETTING_RESP_INVALID_VALUE,
+            },
+          };
+        }
+        setting.value = value;
+        this.changed();
+        return {
+          behaviors: {
+            setBehaviorSetting: SetBehaviorSettingResponse.SET_BEHAVIOR_SETTING_RESP_OK,
+          },
+        };
       }
     }
 
@@ -358,18 +453,17 @@ class SimulatedDevice {
       return { setLayerBinding: 0 };
     }
     if (req.checkUnsavedChanges) {
-      return {
-        checkUnsavedChanges:
-          JSON.stringify(this.layers) !== JSON.stringify(this.savedLayers),
-      };
+      return { checkUnsavedChanges: this.hasUnsavedChanges() };
     }
     if (req.saveChanges) {
       this.savedLayers = clone(this.layers);
+      this.savedSettings = clone(this.settings);
       this.changed();
       return { saveChanges: { ok: true } };
     }
     if (req.discardChanges) {
       this.layers = clone(this.savedLayers);
+      this.settings = clone(this.savedSettings);
       this.changed();
       return { discardChanges: true };
     }
