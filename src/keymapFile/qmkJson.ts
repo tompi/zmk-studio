@@ -12,6 +12,7 @@ import type {
 import { validateValue } from "../behaviors/parameters";
 import { isVialFile, readVialFile, VialFile } from "./vial";
 import { KeyGeom, packKeys, unpackKeys } from "./remap";
+import { BehaviorSettingsFile, readSettingsFile } from "./behaviorSettingsFile";
 import {
   MOD_BITS,
   MOD_NAMES,
@@ -34,7 +35,11 @@ export interface QmkKeymapFile {
   layers: string[][];
   author: string;
   // Extra ZMK Studio data; QMK Configurator ignores it
-  zmk_studio?: { layer_names?: string[]; keys?: number[][] };
+  zmk_studio?: {
+    layer_names?: string[];
+    keys?: number[][];
+    behavior_settings?: BehaviorSettingsFile;
+  };
 }
 
 // Behavior display names as ZMK reports them
@@ -182,7 +187,8 @@ export function exportQmkKeymap(
   behaviors: BehaviorMap,
   keyboard: string,
   layout: string,
-  keys?: KeyGeom[]
+  keys?: KeyGeom[],
+  behaviorSettings?: BehaviorSettingsFile
 ): QmkKeymapFile {
   return {
     version: 1,
@@ -198,6 +204,8 @@ export function exportQmkKeymap(
       layer_names: keymap.layers.map((l) => l.name),
       // Where each key sits, so the keymap can be imported on a different keyboard
       keys: keys && packKeys(keys),
+      // Tapping term etc., by behavior and setting name
+      behavior_settings: behaviorSettings,
     },
   };
 }
@@ -380,6 +388,8 @@ export interface ParsedKeymapFile {
   // The QMK keyboard and layout the file says it's for
   keyboard?: string;
   layout?: string;
+  // Tapping term etc. to set on the keyboard
+  behaviorSettings?: BehaviorSettingsFile;
   // Problems found while reading the file, shown along with the import result
   warnings?: string[];
 }
@@ -426,6 +436,7 @@ export function parseKeymapFile(text: string): KeymapFileContents {
       keys: unpackKeys(file.zmk_studio?.keys),
       keyboard: typeof file.keyboard === "string" ? file.keyboard : undefined,
       layout: typeof file.layout === "string" ? file.layout : undefined,
+      behaviorSettings: readSettingsFile(file.zmk_studio?.behavior_settings),
     },
   };
 }

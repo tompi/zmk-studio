@@ -8,11 +8,7 @@ import type { BehaviorSetting } from "@zmkfirmware/zmk-studio-ts-client/behavior
 import { GenericModal } from "../GenericModal";
 import { useModalRef } from "../misc/useModalRef";
 
-import {
-  BehaviorMap,
-  BehaviorWithSettings,
-  useBehaviorSettings,
-} from "./useBehaviorSettings";
+import type { BehaviorWithSettings } from "./useBehaviorSettings";
 
 // Help for the settings ZMK's hold-tap offers, keyed by the name the firmware reports
 const SETTING_HELP: Record<string, string> = {
@@ -194,8 +190,13 @@ export function BehaviorSettingsPanel({
 const buttonClass =
   "flex flex-1 items-center justify-center gap-1 px-2 py-1 text-sm rounded hover:bg-base-300 disabled:opacity-50";
 
-export function BehaviorSettingsButton({ behaviors }: { behaviors: BehaviorMap }) {
-  const [list, setSetting] = useBehaviorSettings(behaviors);
+export function BehaviorSettingsButton({
+  list,
+  onChange,
+}: {
+  list: BehaviorWithSettings[];
+  onChange: (behaviorId: number, settingId: number, value: number) => void;
+}) {
   const [open, setOpen] = useState(false);
   const ref = useModalRef(open, true);
 
@@ -226,7 +227,7 @@ export function BehaviorSettingsButton({ behaviors }: { behaviors: BehaviorMap }
             Close
           </button>
         </div>
-        <BehaviorSettingsPanel behaviors={list} onChange={setSetting} />
+        <BehaviorSettingsPanel behaviors={list} onChange={onChange} />
       </GenericModal>
     </>
   );

@@ -7,6 +7,14 @@
 import type { KeyPhysicalAttrs } from "@zmkfirmware/zmk-studio-ts-client/keymap";
 import type { ParsedKeymapFile } from "./qmkJson";
 import { KeyGeom, packKeys, unpackKeys } from "./remap";
+import {
+  BehaviorSettingsFile,
+  readSettingsFile,
+  settingsToFile,
+  settingsToVial,
+  vialToSettings,
+} from "./behaviorSettingsFile";
+import type { BehaviorWithSettings } from "../behaviors/useBehaviorSettings";
 
 const isZmkOnlyKey = (code: string) => code.startsWith("ZMK(");
 
@@ -20,6 +28,11 @@ export interface VialFile {
   matrix?: MatrixPos[];
   // Where each key sits, also stored by ZMK Studio's export
   keys?: KeyGeom[];
+  // ZMK Studio's behavior settings if the file has them, else Vial's QMK settings
+  // turned into ZMK ones
+  behaviorSettings?: BehaviorSettingsFile;
+  // Whether behaviorSettings came from Vial's QMK settings
+  settingsFromVial?: boolean;
 }
 
 export function isVialFile(json: unknown): boolean {
@@ -44,9 +57,12 @@ export function readVialFile(json: unknown): VialFile {
   const j = json as {
     layout: VialFile["layout"];
     encoder_layout?: unknown;
-    zmk_studio?: { matrix?: unknown; keys?: unknown };
+    settings?: unknown;
+    zmk_studio?: { matrix?: unknown; keys?: unknown; behavior_settings?: unknown };
   };
   const matrix = j.zmk_studio?.matrix;
+  const zmkSettings = readSettingsFile(j.zmk_studio?.behavior_settings);
+  const vialSettings = zmkSettings ? undefined : vialToSettings(j.settings);
   return {
     layout: j.layout,
     encoderLayout: Array.isArray(j.encoder_layout)
@@ -54,6 +70,8 @@ export function readVialFile(json: unknown): VialFile {
       : undefined,
     matrix: isMatrix(matrix) ? matrix : undefined,
     keys: unpackKeys(j.zmk_studio?.keys),
+    behaviorSettings: zmkSettings ?? vialSettings,
+    settingsFromVial: !!vialSettings,
   };
 }
 
@@ -372,10 +390,17 @@ export function vialToKeymapFile(
     warnings.push("Encoder mappings from Vial aren't imported.");
   }
 
+  if (vial.settingsFromVial) {
+    warnings.push(
+      "The tapping term and tap-hold options from Vial's QMK settings were applied to both mod-tap and layer-tap."
+    );
+  }
+
   return {
     layers,
     warnings,
     keys: keys?.length === matrix.length ? keys : undefined,
+    behaviorSettings: vial.behaviorSettings,
   };
 }
 
@@ -385,7 +410,8 @@ export function vialToKeymapFile(
 export function exportVialKeymap(
   layers: string[][],
   matrix: MatrixPos[],
-  keys?: KeyGeom[]
+  keys?: KeyGeom[],
+  behaviorSettings?: BehaviorWithSettings[]
 ): { file: unknown; warnings: string[] } {
   const warnings: string[] = [];
   const rows = Math.max(0, ...matrix.map(([r]) => r + 1));
@@ -427,7 +453,13 @@ export function exportVialKeymap(
       encoder_layout: [],
       // Default choices, which is what the matrix map above assumes
       layout_options: 0,
-      zmk_studio: { matrix, keys: keys && packKeys(keys) },
+      // Vial's QMK settings: the tapping term and tap-hold options, taken from mod-tap
+      settings: behaviorSettings && settingsToVial(behaviorSettings),
+      zmk_studio: {
+        matrix,
+        keys: keys && packKeys(keys),
+        behavior_settings: behaviorSettings && settingsToFile(behaviorSettings),
+      },
     },
     warnings,
   };

@@ -29,15 +29,20 @@ import {
 } from "./vial";
 import { fitKeymapToKeyboard } from "./fitKeymap";
 import { fromPhysicalKeys } from "./remap";
+import { settingsToFile } from "./behaviorSettingsFile";
+import type { BehaviorWithSettings } from "../behaviors/useBehaviorSettings";
 
 export interface ImportSummary {
   changedKeys: number;
+  changedSettings?: number;
   warnings: string[];
 }
 
 interface KeymapFileControlsProps {
   keymap: Keymap;
   behaviors: BehaviorMap;
+  // Tapping term etc., saved in exports
+  behaviorSettings: BehaviorWithSettings[];
   deviceName: string;
   // The selected physical layout's keys, in key order
   physicalKeys: KeyPhysicalAttrs[];
@@ -105,6 +110,7 @@ const inputClass = "p-1 border rounded border-base-content border-solid bg-base-
 export const KeymapFileControls = ({
   keymap,
   behaviors,
+  behaviorSettings,
   deviceName,
   physicalKeys,
   onImport,
@@ -145,7 +151,14 @@ export const KeymapFileControls = ({
 
     if (format === "qmk") {
       saveQmkNames(deviceName, { keyboard, layout });
-      const file = exportQmkKeymap(keymap, behaviors, keyboard, layout, exportKeys);
+      const file = exportQmkKeymap(
+        keymap,
+        behaviors,
+        keyboard,
+        layout,
+        exportKeys,
+        settingsToFile(behaviorSettings)
+      );
       downloadJson(`${file.keymap}.json`, file);
       setExportNames(undefined);
       return;
@@ -170,7 +183,8 @@ export const KeymapFileControls = ({
       const exported = exportVialKeymap(
         keymapToQmkLayers(keymap, behaviors),
         matrix,
-        exportKeys
+        exportKeys,
+        behaviorSettings.length ? behaviorSettings : undefined
       );
       const { file } = exported;
       const warnings = lookupFailed
@@ -208,12 +222,16 @@ export const KeymapFileControls = ({
 
   const runImport = async (file: ParsedKeymapFile) => {
     try {
-      const { changedKeys, warnings } = await onImport(
+      const { changedKeys, changedSettings, warnings } = await onImport(
         await fitKeymapToKeyboard(file, physicalKeys)
       );
+      const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
+      const changed = changedSettings
+        ? `${plural(changedKeys, "key")} and ${plural(changedSettings, "behavior setting")} changed`
+        : `${plural(changedKeys, "key")} changed`;
       setResult({
         title: "Keymap imported",
-        message: `${changedKeys} key${changedKeys === 1 ? "" : "s"} changed. Save to keep the changes on the keyboard, or use undo to go back.`,
+        message: `${changed}. Save to keep the changes on the keyboard, or use undo to go back.`,
         warnings,
       });
     } catch (e) {

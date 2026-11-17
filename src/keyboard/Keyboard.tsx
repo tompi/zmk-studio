@@ -41,6 +41,7 @@ import { KeyPalette } from "./KeyPalette";
 import { findKeyPress } from "./keyCodes";
 import { useKeyCapture } from "./useKeyCapture";
 import { BehaviorSettingsButton } from "../behaviors/BehaviorSettings";
+import { useBehaviorSettings } from "../behaviors/useBehaviorSettings";
 
 type BehaviorMap = Record<number, GetBehaviorDetailsResponse>;
 
@@ -197,6 +198,7 @@ export default function Keyboard({ deviceName }: KeyboardProps) {
     number | undefined
   >(undefined);
   const behaviors = useBehaviors();
+  const behaviorSettings = useBehaviorSettings(behaviors);
 
   const conn = useContext(ConnectionContext);
   const undoRedo = useContext(UndoRedoContext);
@@ -549,18 +551,25 @@ export default function Keyboard({ deviceName }: KeyboardProps) {
         if (!conn.conn) {
           throw new Error("Not connected");
         }
-        const result = await applyImport(conn.conn, file, behaviors);
+        const result = await applyImport(
+          conn.conn,
+          file,
+          behaviors,
+          behaviorSettings.list
+        );
         setKeymap(result.keymap);
+        if (result.changedSettings) behaviorSettings.reload();
         summary = result;
 
         return async () => {
           const restored = await result.undo();
           if (restored) setKeymap(restored);
+          if (result.changedSettings) behaviorSettings.reload();
         };
       });
       return summary;
     },
-    [conn, undoRedo, behaviors]
+    [conn, undoRedo, behaviors, behaviorSettings]
   );
 
   useEffect(() => {
@@ -604,10 +613,14 @@ export default function Keyboard({ deviceName }: KeyboardProps) {
 
         {keymap && layouts && (
           <div className="mt-auto flex flex-col gap-1">
-            <BehaviorSettingsButton behaviors={behaviors} />
+            <BehaviorSettingsButton
+              list={behaviorSettings.list}
+              onChange={behaviorSettings.setSetting}
+            />
             <KeymapFileControls
               keymap={keymap}
               behaviors={behaviors}
+              behaviorSettings={behaviorSettings.list}
               deviceName={deviceName || "keyboard"}
               physicalKeys={layouts[selectedPhysicalLayoutIndex]?.keys ?? []}
               onImport={importKeymap}

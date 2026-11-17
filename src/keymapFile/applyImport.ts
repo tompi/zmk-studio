@@ -9,6 +9,11 @@ import {
 } from "@zmkfirmware/zmk-studio-ts-client/keymap";
 import { call_rpc } from "../rpc/logging";
 import {
+  BehaviorWithSettings,
+  setBehaviorSetting,
+} from "../behaviors/useBehaviorSettings";
+import { planSettingsChanges } from "./behaviorSettingsFile";
+import {
   BehaviorMap,
   isImportError,
   ParsedKeymapFile,
@@ -18,6 +23,7 @@ import {
 export interface ImportResult {
   keymap: Keymap;
   changedKeys: number;
+  changedSettings: number;
   warnings: string[];
   undo: () => Promise<Keymap | undefined>;
 }
@@ -60,7 +66,8 @@ async function setLayerName(conn: RpcConnection, layerId: number, name: string) 
 export async function applyImport(
   conn: RpcConnection,
   file: ParsedKeymapFile,
-  behaviors: BehaviorMap
+  behaviors: BehaviorMap,
+  behaviorSettings: BehaviorWithSettings[] = []
 ): Promise<ImportResult> {
   const warnings: string[] = [...(file.warnings ?? [])];
   const before = await getKeymap(conn);
@@ -145,7 +152,34 @@ export async function applyImport(
     }
   }
 
+  // Behavior settings, such as the tapping term
+  const changedSettings: { behaviorId: number; settingId: number; oldValue: number }[] = [];
+  if (file.behaviorSettings) {
+    if (!behaviorSettings.length) {
+      warnings.push(
+        "The file has behavior settings (like the tapping term), but this keyboard's firmware can't change them. They were skipped."
+      );
+    } else {
+      const plan = planSettingsChanges(file.behaviorSettings, behaviorSettings);
+      warnings.push(...plan.warnings);
+      for (const c of plan.changes) {
+        if (await setBehaviorSetting(conn, c.behaviorId, c.settingId, c.value)) {
+          changedSettings.push(c);
+        } else {
+          const name =
+            behaviorSettings
+              .find((b) => b.id === c.behaviorId)
+              ?.settings.find((s) => s.id === c.settingId)?.name ?? "a setting";
+          warnings.push(`The keyboard didn't accept the value ${c.value} for ${name}.`);
+        }
+      }
+    }
+  }
+
   const undo = async () => {
+    for (const c of changedSettings) {
+      await setBehaviorSetting(conn, c.behaviorId, c.settingId, c.oldValue);
+    }
     for (const [layerId, k, binding] of oldBindings) {
       await setBinding(conn, layerId, k, binding);
     }
@@ -168,6 +202,7 @@ export async function applyImport(
   return {
     keymap: await getKeymap(conn),
     changedKeys: oldBindings.length,
+    changedSettings: changedSettings.length,
     warnings,
     undo,
   };

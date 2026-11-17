@@ -1,4 +1,5 @@
 import { useCallback, useContext, useEffect, useState } from "react";
+import type { RpcConnection } from "@zmkfirmware/zmk-studio-ts-client";
 import type {
   BehaviorSetting,
   GetBehaviorDetailsResponse,
@@ -17,47 +18,72 @@ export interface BehaviorWithSettings {
   settings: BehaviorSetting[];
 }
 
-// Reads the runtime settings (tapping term etc.) of every behavior that has any, and
-// changes them through undo/redo. Firmware without the settings RPCs gives an empty list.
+// The runtime settings of every behavior that has any, sorted by name.
+// Firmware without the settings RPCs gives an empty list.
+export async function fetchBehaviorSettings(
+  conn: RpcConnection,
+  behaviors: BehaviorMap,
+  isCancelled: () => boolean = () => false
+): Promise<BehaviorWithSettings[] | undefined> {
+  const found: BehaviorWithSettings[] = [];
+  for (const b of Object.values(behaviors)) {
+    const resp = await call_rpc(conn, {
+      behaviors: { getBehaviorSettings: { behaviorId: b.id } },
+    });
+    if (isCancelled()) return undefined;
+
+    const settings = resp?.behaviors?.getBehaviorSettings?.settings;
+    if (!settings) {
+      // Firmware without behavior settings answers with an error; no point asking again
+      if (!resp?.behaviors) break;
+      continue;
+    }
+    if (settings.length > 0) {
+      found.push({ id: b.id, displayName: b.displayName, settings });
+    }
+  }
+
+  return found.sort((a, b) => a.displayName.localeCompare(b.displayName));
+}
+
+export async function setBehaviorSetting(
+  conn: RpcConnection,
+  behaviorId: number,
+  settingId: number,
+  value: number
+): Promise<boolean> {
+  const resp = await call_rpc(conn, {
+    behaviors: { setBehaviorSetting: { behaviorId, settingId, value } },
+  });
+  return (
+    resp?.behaviors?.setBehaviorSetting ===
+    SetBehaviorSettingResponse.SET_BEHAVIOR_SETTING_RESP_OK
+  );
+}
+
+// Reads the behavior settings and changes them through undo/redo
 export function useBehaviorSettings(behaviors: BehaviorMap) {
   const conn = useContext(ConnectionContext);
   const [list, setList] = useState<BehaviorWithSettings[]>([]);
+  const [reloads, setReloads] = useState(0);
 
   useEffect(() => {
     let ignore = false;
-    setList([]);
+    if (reloads === 0) setList([]);
 
     (async () => {
       if (!conn.conn) return;
-
-      const found: BehaviorWithSettings[] = [];
-      for (const b of Object.values(behaviors)) {
-        const resp = await call_rpc(conn.conn, {
-          behaviors: { getBehaviorSettings: { behaviorId: b.id } },
-        });
-        if (ignore) return;
-
-        const settings = resp?.behaviors?.getBehaviorSettings?.settings;
-        if (!settings) {
-          // Firmware without behavior settings answers with an error; no point asking again
-          if (!resp?.behaviors) break;
-          continue;
-        }
-        if (settings.length > 0) {
-          found.push({ id: b.id, displayName: b.displayName, settings });
-        }
-      }
-
-      if (!ignore) {
-        found.sort((a, b) => a.displayName.localeCompare(b.displayName));
-        setList(found);
-      }
+      const found = await fetchBehaviorSettings(conn.conn, behaviors, () => ignore);
+      if (found && !ignore) setList(found);
     })();
 
     return () => {
       ignore = true;
     };
-  }, [conn, behaviors]);
+  }, [conn, behaviors, reloads]);
+
+  // Read the settings again, after something else (like an import) changed them
+  const reload = useCallback(() => setReloads((n) => n + 1), []);
 
   const undoRedo = useContext(UndoRedoContext);
 
@@ -71,17 +97,8 @@ export function useBehaviorSettings(behaviors: BehaviorMap) {
       const apply = async (v: number) => {
         if (!conn.conn) throw new Error("Not connected");
 
-        const resp = await call_rpc(conn.conn, {
-          behaviors: { setBehaviorSetting: { behaviorId, settingId, value: v } },
-        });
-        if (
-          resp?.behaviors?.setBehaviorSetting !==
-          SetBehaviorSettingResponse.SET_BEHAVIOR_SETTING_RESP_OK
-        ) {
-          throw new Error(
-            "Failed to change behavior setting: " +
-              resp?.behaviors?.setBehaviorSetting
-          );
+        if (!(await setBehaviorSetting(conn.conn, behaviorId, settingId, v))) {
+          throw new Error("The keyboard didn't accept the behavior setting");
         }
 
         setList((l) =>
@@ -106,6 +123,5 @@ export function useBehaviorSettings(behaviors: BehaviorMap) {
     [conn, list, undoRedo]
   );
 
-  return [list, setSetting] as const;
+  return { list, setSetting, reload };
 }
-
